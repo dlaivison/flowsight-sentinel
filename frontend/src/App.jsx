@@ -49,14 +49,8 @@ function Sidebar() {
       {/* Logo */}
       <div style={{ padding: '20px 16px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 8,
-            background: 'linear-gradient(135deg, #00D084 0%, #00A86B 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
+          <div style={{ width: 48, height: 48, flexShrink: 0 }}>
+            <img src="/logo.png" alt="FlowSight Sentinel" style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>FlowSight</div>
@@ -235,14 +229,8 @@ function Login() {
       <div style={{ width: 380, animation: 'fadeIn .3s ease' }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 14,
-            background: 'linear-gradient(135deg, #00D084 0%, #00A86B 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 12px',
-            boxShadow: '0 0 32px rgba(0,208,132,0.3)',
-          }}>
-            {I.shield}
+          <div style={{ width: 110, height: 110, margin: '0 auto 12px' }}>
+            <img src="/logo.png" alt="FlowSight Sentinel" style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.5px' }}>FlowSight</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', letterSpacing: '2px', textTransform: 'uppercase', marginTop: 2 }}>Sentinel</div>

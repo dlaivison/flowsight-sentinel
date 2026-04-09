@@ -58,3 +58,13 @@ export const getActiveShift      = ()        => api.get('/api/shifts/active')
 export const getShiftSchedule    = (date)    => api.get('/api/shifts/schedule', { params:{date} })
 export const saveShiftSchedule   = (data)    => api.post('/api/shifts/schedule', data)
 export const removeShiftSchedule = (id)      => api.delete(`/api/shifts/schedule/${id}`)
+
+// Justificativas
+export const getAbsenceReasons      = ()      => api.get('/api/justifications/reasons')
+export const createAbsenceReason    = (data)  => api.post('/api/justifications/reasons', data)
+export const updateAbsenceReason    = (id,d)  => api.put(`/api/justifications/reasons/${id}`, d)
+export const deleteAbsenceReason    = (id)    => api.delete(`/api/justifications/reasons/${id}`)
+export const getActiveJustifications= ()      => api.get('/api/justifications/active')
+export const getPostJustifications  = (postId)=> api.get(`/api/justifications/post/${postId}`)
+export const createJustification    = (data)  => api.post('/api/justifications', data)
+export const resolveJustification   = (id)    => api.post(`/api/justifications/${id}/resolve`)

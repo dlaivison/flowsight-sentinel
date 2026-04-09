@@ -3,11 +3,14 @@ import { useFlowStore } from '../store'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import AlarmModal from '../components/alarms/AlarmModal'
+import JustifyModal from '../components/JustifyModal'
+import { resolveJustification, getPostJustifications } from '../api'
 
 const STATUS = {
-  covered: { color:'#00D084', bg:'rgba(0,208,132,0.1)', border:'rgba(0,208,132,0.2)', label:'Coberto',     dot:'#00D084' },
-  warning: { color:'#F0A500', bg:'rgba(240,165,0,0.1)', border:'rgba(240,165,0,0.2)', label:'Atenção',     dot:'#F0A500' },
-  alarm:   { color:'#FF4444', bg:'rgba(255,68,68,0.1)',  border:'rgba(255,68,68,0.3)', label:'Descoberto',  dot:'#FF4444' },
+  covered:   { color:'#00D084', bg:'rgba(0,208,132,0.1)', border:'rgba(0,208,132,0.2)', label:'Coberto',     dot:'#00D084' },
+  warning:   { color:'#F0A500', bg:'rgba(240,165,0,0.1)', border:'rgba(240,165,0,0.2)', label:'Atenção',     dot:'#F0A500' },
+  alarm:     { color:'#FF4444', bg:'rgba(255,68,68,0.1)',  border:'rgba(255,68,68,0.3)', label:'Descoberto',  dot:'#FF4444' },
+  justified: { color:'#58A6FF', bg:'rgba(88,166,255,0.1)', border:'rgba(88,166,255,0.3)', label:'Justificado', dot:'#58A6FF' },
 }
 
 const initials = n => n?.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase()||'?'
@@ -19,6 +22,13 @@ function absTime(seconds) {
   const s = seconds % 60
   if (m < 60) return s > 0 ? `${m}min ${s}s` : `${m}min`
   return `${Math.floor(m/60)}h ${m%60}min`
+}
+
+function countdown(seconds) {
+  if (!seconds && seconds !== 0) return '—'
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
 }
 
 function GuardChip({ guard }) {
@@ -37,10 +47,44 @@ function GuardChip({ guard }) {
   )
 }
 
-function PostCard({ post, onAlarmClick }) {
+function PostCard({ post, onAlarmClick, onJustify, onCancelJustify }) {
   const sc = STATUS[post.status] || STATUS.covered
   const isAlarm = post.status === 'alarm'
   const guards  = post.guards || []
+  const [localSecs,    setLocalSecs]    = useState(post.absence_seconds)
+  const [justifId,     setJustifId]     = useState(null)
+  const [cancelling,   setCancelling]   = useState(false)
+
+  useEffect(() => {
+    setLocalSecs(post.absence_seconds)
+  }, [post.absence_seconds])
+
+  useEffect(() => {
+    if (post.status !== 'justified') return
+    const t = setInterval(() => {
+      setLocalSecs(s => (s > 0 ? s - 1 : 0))
+    }, 1000)
+    return () => clearInterval(t)
+  }, [post.status])
+
+  useEffect(() => {
+    if (post.status !== 'justified') { setJustifId(null); return }
+    getPostJustifications(post.post_id).then(res => {
+      const list = res.data || res || []
+      if (list.length > 0) setJustifId(list[0].id)
+    }).catch(() => {})
+  }, [post.status, post.post_id])
+
+  const cancelJustify = async (e) => {
+    e.stopPropagation()
+    if (!justifId) return
+    setCancelling(true)
+    try {
+      await resolveJustification(justifId)
+      onCancelJustify && onCancelJustify()
+    } catch(_) {}
+    finally { setCancelling(false) }
+  }
 
   return (
     <div
@@ -64,6 +108,15 @@ function PostCard({ post, onAlarmClick }) {
           letterSpacing:'0.5px',
           animation:'blink 1s step-end infinite',
         }}>DESCOBERTO</div>
+      )}
+      {post.status === 'justified' && (
+        <div style={{
+          position:'absolute', top:0, right:0,
+          background:'#58A6FF', color:'#fff',
+          fontSize:9, fontWeight:700, padding:'3px 8px',
+          borderRadius:'0 var(--radius-md) 0 6px',
+          letterSpacing:'0.5px',
+        }}>JUSTIFICADO</div>
       )}
 
       {/* Header do posto */}
@@ -90,19 +143,50 @@ function PostCard({ post, onAlarmClick }) {
         </div>
       )}
 
+      {/* Botão justificar / cancelar */}
+      {(post.status === 'alarm' || post.status === 'warning' || post.status === 'covered') && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onJustify(post) }}
+          style={{ width:'100%', padding:'7px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(88,166,255,0.3)', background:'rgba(88,166,255,0.08)', color:'#58A6FF', fontSize:11, fontWeight:600, cursor:'pointer', marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}>
+          ⏸ Justificar ausência
+        </button>
+      )}
+      {post.status === 'justified' && (
+        <button
+          onClick={cancelJustify}
+          disabled={cancelling || !justifId}
+          style={{ width:'100%', padding:'7px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.08)', color:'#00D084', fontSize:11, fontWeight:600, cursor:'pointer', marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}>
+          {cancelling ? 'Cancelando...' : '✓ Vigilante retornou — Encerrar justificativa'}
+        </button>
+      )}
+
       {/* Footer com tempo de ausência */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', alignItems:'center', gap:5 }}>
-          {post.last_detected_at && (
-            <>
+          {post.status === 'justified' ? (
+            <span style={{ color:'#58A6FF', display:'flex', alignItems:'center', gap:4 }}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              Última detecção: {format(new Date(post.last_detected_at), 'HH:mm:ss')}
-              {post.last_guard_name && ` · ${post.last_guard_name}`}
+              Ausência justificada
+            </span>
+          ) : (
+            <>
+              {post.last_detected_at && (
+                <>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  Última detecção: {format(new Date(post.last_detected_at), 'HH:mm:ss')}
+                  {post.last_guard_name && ` · ${post.last_guard_name}`}
+                </>
+              )}
+              {!post.last_detected_at && 'Sem detecções recentes'}
             </>
           )}
-          {!post.last_detected_at && 'Sem detecções recentes'}
         </div>
-        {post.status !== 'covered' && (
+        {post.status === 'justified' && localSecs != null && (
+          <span style={{ fontSize:14, fontWeight:700, color:'#58A6FF', fontFamily:'monospace' }}>
+            ⏱ {countdown(localSecs)}
+          </span>
+        )}
+        {post.status !== 'covered' && post.status !== 'justified' && (
           <span style={{ fontSize:12, fontWeight:700, color:sc.color }}>
             {absTime(post.absence_seconds)}
           </span>
@@ -126,6 +210,7 @@ function PostCard({ post, onAlarmClick }) {
 export default function Dashboard() {
   const { guards: rawSnapshot, summary, connected, openAlarmModal } = useFlowStore()
   const [filterFloor, setFilterFloor] = useState('all')
+  const [justifyPost, setJustifyPost] = useState(null)
   const [now, setNow] = useState(new Date())
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 10000); return () => clearInterval(t) }, [])
@@ -243,7 +328,7 @@ export default function Dashboard() {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:12 }}>
               {(floors[floor] || []).map(p => (
-                <PostCard key={p.post_id} post={p} onAlarmClick={handleAlarmClick}/>
+                <PostCard key={p.post_id} post={p} onAlarmClick={handleAlarmClick} onJustify={setJustifyPost} onCancelJustify={() => {}} />
               ))}
             </div>
           </div>
@@ -259,6 +344,13 @@ export default function Dashboard() {
       </div>
 
       <AlarmModal/>
+      {justifyPost && (
+        <JustifyModal
+          post={justifyPost}
+          onClose={() => setJustifyPost(null)}
+          onSave={() => setJustifyPost(null)}
+        />
+      )}
     </div>
   )
 }
