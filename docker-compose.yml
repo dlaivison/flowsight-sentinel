@@ -1,25 +1,28 @@
 version: '3.9'
 
 services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: sentinel_db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: flowsight
-      POSTGRES_USER: flowsight
+      POSTGRES_DB:       flowsight_sentinel
+      POSTGRES_USER:     flowsight
       POSTGRES_PASSWORD: ${DB_PASSWORD:-flowsight_secure_2026}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5434:5432"   # 5433 para não conflitar com PostgreSQL do host
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flowsight"]
+      test: ["CMD-SHELL", "pg_isready -U flowsight -d flowsight_sentinel"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # ─── Backend Node.js ─────────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -29,36 +32,37 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Permite acesso ao Forsight no host
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3001
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: flowsight
-      DB_USER: flowsight
+      NODE_ENV:    production
+      PORT:        3010
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     flowsight_sentinel
+      DB_USER:     flowsight
       DB_PASSWORD: ${DB_PASSWORD:-flowsight_secure_2026}
-      JWT_SECRET: ${JWT_SECRET:-change_this}
-      FORSIGHT_API_URL: ${FORSIGHT_API_URL}
-      FORSIGHT_API_KEY: ${FORSIGHT_API_KEY}
-      ZAPI_INSTANCE: ${ZAPI_INSTANCE:-}
-      ZAPI_TOKEN: ${ZAPI_TOKEN:-}
+      JWT_SECRET:          ${JWT_SECRET:-sentinel_jwt_secret_troque_em_producao}
+      FORSIGHT_API_URL:    ${FORSIGHT_API_URL:-https://host.docker.internal}
+      FORSIGHT_USERNAME:   ${FORSIGHT_USERNAME:-apifortytest}
+      FORSIGHT_PASSWORD:   ${FORSIGHT_PASSWORD:-forty@2025}
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3011:3010"
     volumes:
-      - ./backend/logs:/app/logs
+      - backend_logs:/app/logs
 
+  # ─── Frontend + nginx ────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     container_name: sentinel_frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "0.0.0.0:3000:80"
+      - "0.0.0.0:8889:80"
 
 volumes:
   postgres_data:
+  backend_logs:

@@ -144,7 +144,7 @@ export default function Settings() {
 
   const loadWatchlists = async () => {
     setWatchlistLoading(true)
-    try { const { data } = await getWatchlists(); setWatchlists(data) }
+    try { const res = await getWatchlists(); setWatchlists(res.data || res || []) }
     catch { alert('Erro ao carregar watchlists') }
     finally { setWatchlistLoading(false) }
   }
@@ -167,8 +167,8 @@ export default function Settings() {
     finally { setDeleting(null) }
   }
 
-  const configuredWl = watchlists.find(w => w.id === config.guards_watchlist_id)
-  const currentWl    = watchlists.find(w => w.id === selectedWl)
+  const configuredWl = Array.isArray(watchlists) ? watchlists.find(w => w.id === config.guards_watchlist_id) : null
+  const currentWl    = Array.isArray(watchlists) ? watchlists.find(w => w.id === selectedWl) : null
 
   const btnSave = (k, val) => ({
     padding:'7px 14px', borderRadius:'var(--radius-sm)', border:'none',

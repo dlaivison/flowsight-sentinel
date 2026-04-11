@@ -7,8 +7,8 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 class ForsightService {
   constructor() {
     this.baseUrl  = process.env.FORSIGHT_API_URL || 'https://127.0.0.1';
-    this.username = process.env.FORSIGHT_USERNAME || 'apifortytest';
-    this.password = process.env.FORSIGHT_PASSWORD || 'forty@2025';
+    this.username = process.env.FORSIGHT_USERNAME || '';
+    this.password = process.env.FORSIGHT_PASSWORD || '';
     this.token       = null;
     this.tokenExpiry = null;
     this.sseRequest  = null;
@@ -32,9 +32,48 @@ class ForsightService {
     return this.token;
   }
 
+  async _loadConfigFromDb() {
+    try {
+      const { query } = require('../db')
+      const { rows } = await query(`
+        SELECT key, value FROM system_config
+        WHERE key IN ('forsight_api_url','forsight_username','forsight_password')
+      `)
+      rows.forEach(r => {
+        if (r.key === 'forsight_api_url'  && r.value) this.baseUrl  = r.value
+        if (r.key === 'forsight_username' && r.value) this.username = r.value
+        if (r.key === 'forsight_password' && r.value) this.password = r.value
+      })
+    } catch(e) {
+      console.error('[Forsight] Erro ao carregar config do banco:', e.message)
+    }
+  }
+
   async getToken() {
-    if (!this.token || Date.now() > this.tokenExpiry) await this.login();
-    return this.token;
+    // Recarrega config do banco a cada login
+    await this._loadConfigFromDb()
+    if (this.token && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+      return this.token;
+    }
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const { data } = await this.client.post(
+          '/users_service/auth/login/',
+          `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}&session_time=999999999999`,
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        this.token = data.data?.token;
+        this.tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+        console.log('[Forsight] Login OK — token obtido');
+        return this.token;
+      } catch (err) {
+        console.log(`[Forsight] Login falhou (tentativa ${attempt}/5): ${err.message}`);
+        if (attempt < 5) await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+    console.log('[Forsight] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
+    setTimeout(() => { this.token = null; this.tokenExpiry = null; }, 30000);
+    throw new Error('Forsight login failed');
   }
 
   async fetchCameras() {
@@ -218,8 +257,13 @@ class ForsightService {
 
       const req = https.request(opts, (res) => {
         if (res.statusCode === 307 && res.headers.location) {
-          console.log(`[Forsight] SSE redirect → ${res.headers.location}`);
-          resolve(res.headers.location);
+          let sseLocation = res.headers.location;
+          // No Docker, substitui 127.0.0.1 pelo host para SSE dinâmico
+          if (process.env.FORSIGHT_API_URL && process.env.FORSIGHT_API_URL.includes('host.docker.internal')) {
+            sseLocation = sseLocation.replace('127.0.0.1', 'host.docker.internal');
+          }
+          console.log(`[Forsight] SSE redirect → ${sseLocation}`);
+          resolve(sseLocation);
         } else {
           console.error(`[Forsight] Redirect esperado 307, recebeu ${res.statusCode}`);
           resolve(null);
