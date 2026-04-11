@@ -195,64 +195,140 @@ function GuardRow({ guard, onEdit }) {
 }
 
 // ─── Bloco de turno na escala ─────────────────────────────────────────────────
+// ─── Modal para adicionar vigilante ao turno ─────────────────────────────────
+function AddGuardModal({ shift, date, posts, onClose, onSave }) {
+  const [selected, setSelected] = useState(null)
+  const [postId,   setPostId]   = useState('')
+  const [saving,   setSaving]   = useState(false)
+
+  const save = async () => {
+    if (!selected) return
+    setSaving(true)
+    try {
+      await saveShiftSchedule({
+        shift_type_id: shift.id,
+        guard_id:      selected.id,
+        post_id:       postId || null,
+        date,
+        status:        'active',
+      })
+      onSave()
+    } catch(e) { console.error(e) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:16 }}>
+      <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', width:'100%', maxWidth:440, overflow:'hidden' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 20px', borderBottom:'1px solid var(--border-subtle)', background:`${shift.color}08` }}>
+          <div>
+            <div style={{ fontSize:14, fontWeight:700 }}>Adicionar ao turno {shift.name}</div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>{date} · {shift.start_time.slice(0,5)} → {shift.end_time.slice(0,5)}</div>
+          </div>
+          <button onClick={onClose} style={{ border:'none', background:'var(--bg-hover)', color:'var(--text-secondary)', width:28, height:28, borderRadius:6, cursor:'pointer' }}>✕</button>
+        </div>
+        <div style={{ padding:'14px 20px', display:'flex', flexDirection:'column', gap:12 }}>
+          <div>
+            <label style={{ display:'block', fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:8 }}>Selecione o vigilante</label>
+            {shift.unscheduled.length === 0 ? (
+              <div style={{ padding:'16px', textAlign:'center', fontSize:12, color:'var(--text-muted)', background:'var(--bg-card)', borderRadius:'var(--radius-sm)', border:'1px solid var(--border-subtle)' }}>
+                Todos os vigilantes já estão escalados neste turno
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:220, overflowY:'auto' }}>
+                {shift.unscheduled.map(g => (
+                  <label key={g.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 12px', borderRadius:'var(--radius-sm)', cursor:'pointer',
+                    border:`1px solid ${selected?.id===g.id ? 'rgba(0,208,132,0.4)' : 'var(--border-subtle)'}`,
+                    background: selected?.id===g.id ? 'rgba(0,208,132,0.08)' : 'var(--bg-card)' }}>
+                    <input type="radio" name="guard" checked={selected?.id===g.id} onChange={()=>setSelected(g)} style={{ accentColor:'#00D084' }}/>
+                    <div style={{ width:28, height:28, borderRadius:'50%', background:'rgba(88,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:700, color:'#58A6FF', overflow:'hidden', flexShrink:0 }}>
+                      {g.photo_url ? <img src={g.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : g.name?.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase()}
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:600 }}>{g.name}</div>
+                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>Mat: {g.badge_number||'—'}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          {selected && (
+            <div>
+              <label style={{ display:'block', fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:6 }}>Posto (opcional)</label>
+              <select value={postId} onChange={e=>setPostId(e.target.value)} style={{ width:'100%', padding:'8px 12px', background:'var(--bg-primary)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-primary)', fontSize:12, outline:'none' }}>
+                <option value="">Sem posto específico</option>
+                {posts.map(p => <option key={p.id} value={p.id}>{p.name} — {p.floor||'s/andar'}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+        <div style={{ display:'flex', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:'1px solid var(--border-subtle)' }}>
+          <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:13, cursor:'pointer' }}>Cancelar</button>
+          <button onClick={save} disabled={saving||!selected} style={{ padding:'8px 20px', borderRadius:'var(--radius-sm)', border:'none', background:selected?'linear-gradient(135deg,#00D084,#00A86B)':'var(--bg-hover)', color:selected?'#000':'var(--text-muted)', fontSize:13, fontWeight:700, cursor:selected?'pointer':'not-allowed' }}>
+            {saving ? 'Adicionando...' : '+ Adicionar ao turno'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Bloco de turno na escala ─────────────────────────────────────────────────
 function ShiftBlock({ shift, date, posts, onRefresh }) {
-  const [scheduleModal, setScheduleModal] = useState(null)
-
-  const allGuards = [
-    ...shift.scheduled.map(g => ({ ...g, inSchedule: true })),
-    ...shift.unscheduled.map(g => ({ ...g, inSchedule: false, status: null })),
-  ]
-
+  const [editModal, setEditModal] = useState(null)
+  const [addModal,  setAddModal]  = useState(false)
   const activeCount = shift.scheduled.filter(g => g.status === 'active').length
+
+  const handleRemove = async (scheduleId) => {
+    if (!confirm('Remover este vigilante do turno?')) return
+    try { await removeShiftSchedule(scheduleId); onRefresh() }
+    catch(e) { console.error(e) }
+  }
 
   return (
     <div style={{ background:'var(--bg-secondary)', border:`1px solid ${shift.is_current ? shift.color+'44' : 'var(--border-subtle)'}`, borderRadius:'var(--radius-lg)', overflow:'hidden', boxShadow: shift.is_current ? `0 0 20px ${shift.color}15` : 'none' }}>
-      {/* Header do turno */}
       <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', gap:10, background: shift.is_current ? `${shift.color}08` : 'transparent' }}>
         <div style={{ width:10, height:10, borderRadius:'50%', background:shift.color, flexShrink:0, boxShadow: shift.is_current ? `0 0 8px ${shift.color}` : 'none' }}/>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:14, fontWeight:700 }}>{shift.name}</div>
-          <div style={{ fontSize:11, color:'var(--text-muted)' }}>
-            {shift.start_time.slice(0,5)} → {shift.end_time.slice(0,5)}
-          </div>
+          <div style={{ fontSize:11, color:'var(--text-muted)' }}>{shift.start_time.slice(0,5)} → {shift.end_time.slice(0,5)}</div>
         </div>
         {shift.is_current && (
-          <span style={{ fontSize:10, fontWeight:700, padding:'3px 10px', borderRadius:12, background:`${shift.color}20`, color:shift.color, border:`1px solid ${shift.color}40` }}>
-            ● TURNO ATIVO
-          </span>
+          <span style={{ fontSize:10, fontWeight:700, padding:'3px 10px', borderRadius:12, background:`${shift.color}20`, color:shift.color, border:`1px solid ${shift.color}40` }}>● TURNO ATIVO</span>
         )}
-        <span style={{ fontSize:11, color:'var(--text-muted)' }}>
-          {activeCount} ativo(s) · {allGuards.length} total
-        </span>
+        <span style={{ fontSize:11, color:'var(--text-muted)', marginRight:8 }}>{activeCount} ativo(s) · {shift.scheduled.length} total</span>
+        <button onClick={() => setAddModal(true)} style={{ display:'flex', alignItems:'center', gap:4, padding:'5px 12px', borderRadius:'var(--radius-sm)', border:`1px solid ${shift.color}44`, background:`${shift.color}10`, color:shift.color, fontSize:11, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+          + Adicionar
+        </button>
       </div>
-
-      {/* Lista de vigilantes */}
       <div>
-        {allGuards.length === 0 && (
-          <div style={{ padding:'20px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>
-            Nenhum vigilante cadastrado
+        {shift.scheduled.length === 0 ? (
+          <div style={{ padding:'24px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>
+            Nenhum vigilante escalado —
+            <button onClick={() => setAddModal(true)} style={{ marginLeft:6, color:'var(--green)', background:'none', border:'none', cursor:'pointer', fontSize:12, fontWeight:600 }}>+ Adicionar</button>
           </div>
-        )}
-        {allGuards.map(g => (
-          <GuardRow
-            key={g.id||g.guard_id}
-            guard={g}
-            onEdit={() => setScheduleModal(g)}
-          />
+        ) : shift.scheduled.map(g => (
+          <div key={g.id||g.guard_id} style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 16px', borderBottom:'1px solid var(--border-subtle)', transition:'background .15s' }}
+            onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'}
+            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+            <div style={{ width:32, height:32, borderRadius:'50%', background:'rgba(88,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, color:'#58A6FF', overflow:'hidden', flexShrink:0 }}>
+              {g.photo_url ? <img src={g.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : g.guard_name?.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase()}
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:13, fontWeight:600 }}>{g.guard_name}</div>
+              <div style={{ fontSize:10, color:'var(--text-muted)' }}>{g.post_name ? `📍 ${g.post_name}` : 'Sem posto'} · Mat: {g.badge_number||'—'}</div>
+            </div>
+            {(() => { const st = STATUS_OPTIONS.find(s=>s.value===g.status)||STATUS_OPTIONS[0]; return (
+              <span style={{ fontSize:11, fontWeight:600, padding:'3px 10px', borderRadius:12, background:`${st.color}18`, color:st.color, border:`1px solid ${st.color}33`, flexShrink:0 }}>{st.icon} {st.label}</span>
+            )})()}
+            <button onClick={() => setEditModal(g)} style={{ padding:'4px 10px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:11, cursor:'pointer' }}>Editar</button>
+            <button onClick={() => handleRemove(g.id)} style={{ padding:'4px 10px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(255,68,68,0.3)', background:'rgba(255,68,68,0.08)', color:'#FF4444', fontSize:11, cursor:'pointer' }}>Remover</button>
+          </div>
         ))}
       </div>
-
-      {scheduleModal && (
-        <ScheduleModal
-          guard={scheduleModal}
-          shiftId={shift.id}
-          date={date}
-          posts={posts}
-          existing={scheduleModal.inSchedule ? scheduleModal : null}
-          onClose={() => setScheduleModal(null)}
-          onSave={() => { setScheduleModal(null); onRefresh() }}
-        />
-      )}
+      {addModal  && <AddGuardModal shift={shift} date={date} posts={posts} onClose={() => setAddModal(false)} onSave={() => { setAddModal(false); onRefresh() }}/>}
+      {editModal && <ScheduleModal guard={editModal} shiftId={shift.id} date={date} posts={posts} existing={editModal} onClose={() => setEditModal(null)} onSave={() => { setEditModal(null); onRefresh() }}/>}
     </div>
   )
 }
