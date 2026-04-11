@@ -88,7 +88,7 @@ export default function History() {
       {/* Tabela */}
       <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
         <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'130px 1fr 1fr 80px 80px 100px 110px', padding:'10px 16px', borderBottom:'1px solid var(--border-subtle)', fontSize:10, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'130px 1fr 1fr 80px 80px 110px 130px', padding:'10px 16px', borderBottom:'1px solid var(--border-subtle)', fontSize:10, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px' }}>
             {['Data/Hora','Vigilante','Posto','Ausência','Limite','Status','Confirmado'].map(h=><span key={h}>{h}</span>)}
           </div>
 
@@ -98,7 +98,7 @@ export default function History() {
           {rows.map((row,i)=>{
             const ss = ST[row.status]||ST.active
             return (
-              <div key={row.id} style={{ display:'grid', gridTemplateColumns:'130px 1fr 1fr 80px 80px 100px 110px', padding:'11px 16px', borderBottom:i<rows.length-1?'1px solid var(--border-subtle)':'none', fontSize:12, alignItems:'center', transition:'background .15s' }}
+              <div key={row.id} style={{ display:'grid', gridTemplateColumns:'130px 1fr 1fr 80px 80px 110px 130px', padding:'11px 16px', borderBottom:i<rows.length-1?'1px solid var(--border-subtle)':'none', fontSize:12, alignItems:'center', transition:'background .15s' }}
                 onMouseEnter={e=>e.currentTarget.style.background='var(--bg-card)'}
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                 <div>
@@ -119,9 +119,9 @@ export default function History() {
                 <div style={{ fontWeight:700, color:row.absence_minutes>=row.threshold_minutes?'#FF4444':'#F0A500' }}>{row.absence_minutes} min</div>
                 <div style={{ color:'var(--text-muted)' }}>{row.threshold_minutes} min</div>
                 <span style={{ padding:'3px 8px', borderRadius:4, background:ss.bg, color:ss.color, fontSize:10, fontWeight:700, letterSpacing:'0.3px', display:'inline-block' }}>{ss.label}</span>
-                <div style={{ fontSize:11, color:'var(--text-muted)' }}>
-                  {row.acknowledged_by||'—'}
-                  {row.acknowledged_at && <div style={{ fontSize:10 }}>{format(parseISO(row.acknowledged_at),'HH:mm')}</div>}
+                <div style={{ fontSize:11, color:'var(--text-muted)', minWidth:0 }}>
+                  <div style={{ fontWeight:500, color:'var(--text-secondary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{row.acknowledged_by||'—'}</div>
+                  {row.acknowledged_at && <div style={{ fontSize:10, marginTop:2 }}>{format(parseISO(row.acknowledged_at),'HH:mm')}</div>}
                 </div>
               </div>
             )
