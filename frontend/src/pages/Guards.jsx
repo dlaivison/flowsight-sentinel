@@ -1,16 +1,224 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getGuards, createGuard, updateGuard, getGuardHistory, getPoisGallery, getWatchlistPois, getPosts, assignGuardToPost } from '../api'
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { format } from 'date-fns'
+import { getGuards, createGuard, updateGuard, getGuardHistory,
+         getWatchlistPois, getPosts, assignGuardToPost, getPoisGallery,
+         getShiftSchedule, getActiveShift } from '../api'
 
-const STATUS = {
-  present: { color:'#00D084', label:'PRESENTE' },
-  warning: { color:'#F0A500', label:'ATENÇÃO'  },
-  alarm:   { color:'#FF4444', label:'ALARME'   },
+const STATUS_COLORS = {
+  present:  { color:'#00D084', bg:'rgba(0,208,132,0.1)',  label:'Presente'  },
+  warning:  { color:'#F0A500', bg:'rgba(240,165,0,0.1)',  label:'Atenção'   },
+  alarm:    { color:'#FF4444', bg:'rgba(255,68,68,0.1)',  label:'Ausente'   },
+  active:   { color:'#00D084', bg:'rgba(0,208,132,0.1)',  label:'Ativo'     },
+  day_off:  { color:'#8B949E', bg:'rgba(139,148,158,0.1)',label:'Folga'     },
+  vacation: { color:'#58A6FF', bg:'rgba(88,166,255,0.1)', label:'Férias'    },
+  sick:     { color:'#F0A500', bg:'rgba(240,165,0,0.1)',  label:'Afastado'  },
+  absent:   { color:'#FF4444', bg:'rgba(255,68,68,0.1)',  label:'Falta'     },
+  off:      { color:'#8B949E', bg:'rgba(139,148,158,0.1)',label:'Fora'      },
 }
+
 const initials = n => n?.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase()||'?'
 
-const inp = { width:'100%', padding:'9px 12px', background:'var(--bg-primary)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-primary)', fontSize:13, outline:'none' }
+function fmt(dt) {
+  if (!dt) return '—'
+  return new Date(dt).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })
+}
+
+// ─── PAINEL DE VIGILANTES ────────────────────────────────────────────────────
+function GuardPanel() {
+  const [guards,    setGuards]    = useState([])
+  const [schedule,  setSchedule]  = useState(null)
+  const [activeShift, setActiveShift] = useState(null)
+  const [loading,   setLoading]   = useState(true)
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filterPost,   setFilterPost]   = useState('all')
+  const [posts,     setPosts]     = useState([])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [guardsData, schedData, shiftData, postsData] = await Promise.all([
+        getGuards(),
+        getShiftSchedule(),
+        getActiveShift(),
+        getPosts(),
+      ])
+      setGuards(guardsData)
+      setSchedule(schedData.data || schedData)
+      setActiveShift(shiftData.data || shiftData)
+      setPosts(postsData)
+    } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  // Monta mapa de status do turno por guard_id
+  const scheduleMap = {}
+  if (schedule?.shifts) {
+    schedule.shifts.forEach(shift => {
+      shift.scheduled?.forEach(s => {
+        scheduleMap[s.guard_id] = {
+          status:    s.status,
+          post_id:   s.post_id,
+          post_name: s.post_name,
+          shift_name: shift.name,
+          is_current: shift.is_current,
+        }
+      })
+    })
+  }
+
+  // Enriquece guards com dados do turno
+  const enriched = guards.map(g => {
+    const sched = scheduleMap[g.id]
+    return {
+      ...g,
+      shift_status: sched?.status || null,
+      shift_name:   sched?.shift_name || null,
+      post_name:    sched?.post_name || g.post_name || null,
+      is_current:   sched?.is_current || false,
+    }
+  })
+
+  // Filtros
+  const allPosts = ['all', ...new Set(enriched.map(g => g.post_name).filter(Boolean))]
+  const allStatuses = ['all', 'active', 'day_off', 'vacation', 'sick', 'absent']
+
+  const filtered = enriched.filter(g => {
+    if (filterStatus !== 'all' && g.shift_status !== filterStatus) return false
+    if (filterPost !== 'all' && g.post_name !== filterPost) return false
+    return true
+  })
+
+  // KPIs
+  const kpis = {
+    total:    enriched.length,
+    active:   enriched.filter(g => g.shift_status === 'active').length,
+    off:      enriched.filter(g => ['day_off','vacation','sick','absent'].includes(g.shift_status)).length,
+    no_shift: enriched.filter(g => !g.shift_status).length,
+  }
+
+  if (loading) return <div style={{ padding:40, color:'var(--text-muted)', fontSize:13 }}>Carregando...</div>
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+
+      {/* Turno ativo */}
+      {activeShift && (
+        <div style={{ background:'var(--bg-card)', border:'1px solid rgba(0,208,132,0.2)', borderRadius:'var(--radius-md)', padding:'10px 16px', display:'flex', alignItems:'center', gap:10, fontSize:12 }}>
+          <div style={{ width:8, height:8, borderRadius:'50%', background:'#00D084', animation:'pulse-green 1.5s infinite' }}/>
+          <span style={{ fontWeight:600, color:'var(--green)' }}>Turno ativo:</span>
+          <span style={{ color:'var(--text-secondary)' }}>{activeShift.name} · {activeShift.start_time?.slice(0,5)} → {activeShift.end_time?.slice(0,5)}</span>
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+        {[
+          { label:'Total',        value:kpis.total,    color:'#58A6FF' },
+          { label:'Ativos',       value:kpis.active,   color:'#00D084' },
+          { label:'Ausentes',     value:kpis.off,      color:'#8B949E' },
+          { label:'Sem escala',   value:kpis.no_shift, color:'#F0A500' },
+        ].map(k => (
+          <div key={k.label} style={{ background:'var(--bg-secondary)', border:`1px solid ${k.color}33`, borderRadius:'var(--radius-md)', padding:'14px 16px' }}>
+            <div style={{ fontSize:26, fontWeight:700, color:k.color, lineHeight:1 }}>{k.value}</div>
+            <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filtros */}
+      <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
+        <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+          <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>Status:</span>
+          {[['all','Todos'],['active','Ativo'],['day_off','Folga'],['vacation','Férias'],['sick','Afastado'],['absent','Falta']].map(([v,l]) => (
+            <button key={v} onClick={() => setFilterStatus(v)} style={{
+              padding:'4px 10px', borderRadius:12, fontSize:11, fontWeight:600,
+              border:'1px solid', cursor:'pointer',
+              borderColor: filterStatus===v ? 'var(--green)' : 'var(--border)',
+              background:  filterStatus===v ? 'rgba(0,208,132,0.1)' : 'transparent',
+              color:       filterStatus===v ? 'var(--green)' : 'var(--text-muted)',
+            }}>{l}</button>
+          ))}
+        </div>
+        {posts.length > 0 && (
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>Posto:</span>
+            <select value={filterPost} onChange={e=>setFilterPost(e.target.value)} style={{ padding:'4px 8px', background:'var(--bg-primary)', border:'1px solid var(--border)', borderRadius:6, color:'var(--text-secondary)', fontSize:11, outline:'none' }}>
+              <option value="all">Todos os postos</option>
+              {posts.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+              <option value="">Sem posto</option>
+            </select>
+          </div>
+        )}
+        <button onClick={load} style={{ marginLeft:'auto', padding:'5px 12px', borderRadius:6, border:'1px solid var(--border)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>↺ Atualizar</button>
+      </div>
+
+      {/* Tabela */}
+      <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'2fr 1.5fr 1fr 1fr 1fr', padding:'10px 16px', borderBottom:'1px solid var(--border-subtle)', background:'var(--bg-card)' }}>
+          {['Vigilante','Posto','Turno','Status','Última det.'].map(h => (
+            <div key={h} style={{ fontSize:10, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.5px' }}>{h}</div>
+          ))}
+        </div>
+
+        {filtered.length === 0 && (
+          <div style={{ padding:32, textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>Nenhum vigilante encontrado</div>
+        )}
+
+        {filtered.map((g, i) => {
+          const st = STATUS_COLORS[g.shift_status] || STATUS_COLORS.off
+          const absence = STATUS_COLORS[g.status] || STATUS_COLORS.present
+          return (
+            <div key={g.id} style={{ display:'grid', gridTemplateColumns:'2fr 1.5fr 1fr 1fr 1fr', padding:'12px 16px', borderBottom: i < filtered.length-1 ? '1px solid var(--border-subtle)' : 'none', alignItems:'center', transition:'background .15s' }}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+
+              {/* Vigilante */}
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <div style={{ width:34, height:34, borderRadius:'50%', flexShrink:0, background:`${absence.color}22`, border:`1.5px solid ${absence.color}44`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:absence.color, overflow:'hidden' }}>
+                  {g.photo_url ? <img src={g.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : initials(g.name)}
+                </div>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:600 }}>{g.name}</div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)' }}>Mat: {g.badge_number||'—'}</div>
+                </div>
+              </div>
+
+              {/* Posto */}
+              <div style={{ fontSize:12, color:'var(--text-secondary)' }}>
+                {g.post_name || <span style={{ color:'var(--text-muted)', fontStyle:'italic' }}>Sem posto</span>}
+              </div>
+
+              {/* Turno */}
+              <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                {g.shift_name || <span style={{ fontStyle:'italic' }}>—</span>}
+                {g.is_current && <span style={{ marginLeft:4, color:'#00D084', fontSize:9 }}>●</span>}
+              </div>
+
+              {/* Status */}
+              <div>
+                {g.shift_status ? (
+                  <span style={{ fontSize:11, fontWeight:600, padding:'3px 10px', borderRadius:12, background:st.bg, color:st.color, border:`1px solid ${st.color}33` }}>
+                    {st.label}
+                  </span>
+                ) : (
+                  <span style={{ fontSize:11, color:'var(--text-muted)', fontStyle:'italic' }}>Sem escala</span>
+                )}
+              </div>
+
+              {/* Última detecção */}
+              <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                {fmt(g.last_detected_at)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── GALERIA DE POIs (cadastro) ──────────────────────────────────────────────
+const inp = { padding:'8px 12px', background:'var(--bg-primary)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-primary)', fontSize:12, outline:'none' }
 
 function Field({ label, children }) {
   return (
@@ -21,30 +229,65 @@ function Field({ label, children }) {
   )
 }
 
-function Modal({ title, subtitle, onClose, children, maxWidth=460 }) {
+function EditModal({ guard, onClose, onSave }) {
+  const [form, setForm] = useState({ name:guard.name||'', badge_number:guard.badge_number||'', group_name:guard.group_name||'' })
+  const [posts,   setPosts]   = useState([])
+  const [postId,  setPostId]  = useState(guard.post_id||'')
+  const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState('')
+
+  useEffect(() => { getPosts().then(setPosts).catch(() => {}) }, [])
+
+  const save = async () => {
+    if (!form.name.trim()) { setError('Nome é obrigatório'); return }
+    setSaving(true)
+    try {
+      await updateGuard(guard.id, form)
+      if (postId && postId !== guard.post_id) await assignGuardToPost(postId, guard.id)
+      onSave()
+    } catch(e) { setError(e.response?.data?.error||'Erro ao salvar') }
+    finally { setSaving(false) }
+  }
+
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:16 }}>
-      <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', width:'100%', maxWidth, overflow:'hidden', boxShadow:'0 24px 48px rgba(0,0,0,0.5)', animation:'fadeIn .2s ease' }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:'1px solid var(--border-subtle)' }}>
-          <div>
-            <div style={{ fontSize:15, fontWeight:700 }}>{title}</div>
-            {subtitle && <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>{subtitle}</div>}
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:16 }}>
+      <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', width:'100%', maxWidth:440, overflow:'hidden' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 20px', borderBottom:'1px solid var(--border-subtle)' }}>
+          <div style={{ width:36, height:36, borderRadius:'50%', background:'rgba(88,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, color:'#58A6FF', overflow:'hidden', flexShrink:0 }}>
+            {guard.photo_url ? <img src={guard.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : initials(guard.name)}
           </div>
+          <span style={{ fontSize:15, fontWeight:700, flex:1 }}>Editar vigilante</span>
           <button onClick={onClose} style={{ border:'none', background:'var(--bg-hover)', color:'var(--text-secondary)', width:28, height:28, borderRadius:6, cursor:'pointer' }}>✕</button>
         </div>
-        {children}
+        <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:12 }}>
+          <Field label="Nome *"><input style={{ ...inp, width:'100%' }} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></Field>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <Field label="Matrícula"><input style={inp} value={form.badge_number} onChange={e=>setForm(f=>({...f,badge_number:e.target.value}))} placeholder="VIG-001"/></Field>
+            <Field label="Grupo"><input style={inp} value={form.group_name} onChange={e=>setForm(f=>({...f,group_name:e.target.value}))}/></Field>
+          </div>
+          <Field label="Posto atual">
+            <select style={{ ...inp, width:'100%' }} value={postId} onChange={e=>setPostId(e.target.value)}>
+              <option value="">Sem posto</option>
+              {posts.map(p => <option key={p.id} value={p.id}>{p.name} — {p.floor||'s/andar'}</option>)}
+            </select>
+          </Field>
+          {error && <div style={{ background:'rgba(255,68,68,0.1)', border:'1px solid rgba(255,68,68,0.3)', borderRadius:'var(--radius-sm)', padding:'8px 12px', fontSize:12, color:'#FF4444' }}>{error}</div>}
+        </div>
+        <div style={{ display:'flex', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:'1px solid var(--border-subtle)' }}>
+          <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:13, cursor:'pointer' }}>Cancelar</button>
+          <button onClick={save} disabled={saving} style={{ padding:'8px 20px', borderRadius:'var(--radius-sm)', border:'none', background:'linear-gradient(135deg,#00D084,#00A86B)', color:'#000', fontSize:13, fontWeight:700, cursor:'pointer' }}>{saving?'Salvando...':'Salvar'}</button>
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Galeria de POIs do Forsight ───────────────────────────────
-function POIGallery({ onClose, onSave }) {
+function RegisterModal({ onClose, onSave }) {
   const [pois,     setPois]     = useState([])
   const [posts,    setPosts]    = useState([])
   const [loading,  setLoading]  = useState(true)
   const [search,   setSearch]   = useState('')
-  const [filter,   setFilter]   = useState('all') // all | available | registered
+  const [filter,   setFilter]   = useState('all')
   const [selected, setSelected] = useState(null)
   const [form,     setForm]     = useState({ name:'', badge_number:'', group_name:'', post_id:'' })
   const [saving,   setSaving]   = useState(false)
@@ -52,401 +295,207 @@ function POIGallery({ onClose, onSave }) {
 
   useEffect(() => {
     Promise.all([getWatchlistPois(), getPosts()])
-      .then(([wlData, postsData]) => {
-        // Se watchlist configurada, usa os POIs dela; senão cai no fallback geral
-        if (wlData.configured) {
-          if (wlData.pois.length === 0) {
-            setError(wlData.message || 'Nenhum POI encontrado na watchlist configurada.')
-          }
-          setPois(wlData.pois)
-        } else {
-          // Sem watchlist configurada — avisa o operador
-          setError('Watchlist não configurada. Configure em Parâmetros → Watchlist de Vigilantes.')
-          setPois([])
-        }
+      .then(([wlRes, postsData]) => {
+        const wlData = wlRes.data || wlRes
+        if (wlData.configured) setPois(wlData.pois || [])
+        else setError('Watchlist não configurada. Configure em Parâmetros.')
         setPosts(postsData)
       })
-      .catch(() => setError('Erro ao carregar dados do Forsight'))
+      .catch(() => setError('Erro ao carregar dados'))
       .finally(() => setLoading(false))
   }, [])
 
-  const selectPOI = (poi) => {
-    if (poi.registered) return
-    setSelected(poi)
-    setForm(f => ({ ...f, name: poi.display_name }))
-    setError('')
-  }
+  const filtered = pois.filter(p => {
+    if (filter === 'available' && p.registered) return false
+    if (filter === 'registered' && !p.registered) return false
+    return !search || p.display_name.toLowerCase().includes(search.toLowerCase())
+  })
 
   const save = async () => {
     if (!selected) { setError('Selecione um POI'); return }
     if (!form.name.trim()) { setError('Nome é obrigatório'); return }
     setSaving(true)
     try {
-      const guard = await createGuard({
+      const res = await createGuard({
         forsight_poi_id: selected.poi_id,
         name:            form.name,
         badge_number:    form.badge_number,
         group_name:      form.group_name,
         photo_url:       selected.display_img ? `data:image/jpeg;base64,${selected.display_img}` : null,
       })
-      // Se selecionou um posto, atribui automaticamente
-      if (form.post_id && guard?.id) {
-        await assignGuardToPost(form.post_id, guard.id)
-      }
+      const guard = res.data || res
+      if (form.post_id && guard?.id) await assignGuardToPost(form.post_id, guard.id)
       onSave()
-    } catch(e) { setError(e.response?.data?.error || 'Erro ao cadastrar') }
-    finally { setSaving(false) }
-  }
-
-  const filtered = pois.filter(p => {
-    const matchSearch = p.display_name.toLowerCase().includes(search.toLowerCase())
-    const matchFilter = filter === 'all' ? true : filter === 'available' ? !p.registered : p.registered
-    return matchSearch && matchFilter
-  })
-
-  const available   = pois.filter(p => !p.registered).length
-  const registered  = pois.filter(p =>  p.registered).length
-
-  return (
-    <Modal title="Selecionar POI do Forsight" subtitle="Clique na foto do vigilante para cadastrá-lo no Sentinel" onClose={onClose} maxWidth={680}>
-      {/* Search + filtros */}
-      <div style={{ padding:'12px 20px', borderBottom:'1px solid var(--border-subtle)', display:'flex', gap:8, alignItems:'center' }}>
-        <div style={{ position:'relative', flex:1 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input style={{ ...inp, paddingLeft:32, background:'var(--bg-card)' }} placeholder="Buscar por nome..." value={search} onChange={e=>setSearch(e.target.value)}/>
-        </div>
-        {[['all','Todos',pois.length],['available','Disponíveis',available],['registered','Cadastrados',registered]].map(([v,l,c]) => (
-          <button key={v} onClick={()=>setFilter(v)} style={{ padding:'7px 12px', borderRadius:'var(--radius-sm)', fontSize:11, fontWeight:600, cursor:'pointer', border:'1px solid', borderColor: filter===v?'rgba(0,208,132,0.4)':'var(--border)', background: filter===v?'rgba(0,208,132,0.1)':'transparent', color: filter===v?'var(--green)':'var(--text-muted)', whiteSpace:'nowrap' }}>
-            {l} <span style={{ background:'var(--bg-hover)', borderRadius:10, padding:'1px 6px', marginLeft:4 }}>{c}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Galeria */}
-      <div style={{ maxHeight:320, overflowY:'auto', padding:'14px 20px' }}>
-        {loading && (
-          <div style={{ textAlign:'center', padding:'40px 0', color:'var(--text-muted)' }}>
-            <div style={{ width:28, height:28, border:'2px solid var(--green)', borderTopColor:'transparent', borderRadius:'50%', animation:'spin 0.8s linear infinite', margin:'0 auto 12px' }}/>
-            Carregando {pois.length > 0 ? pois.length : ''} POIs do Forsight...
-          </div>
-        )}
-        {!loading && filtered.length === 0 && (
-          <div style={{ textAlign:'center', padding:'32px 0', color:'var(--text-muted)', fontSize:12 }}>Nenhum POI encontrado</div>
-        )}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(110px, 1fr))', gap:10 }}>
-          {filtered.map(poi => {
-            const isSel  = selected?.poi_id === poi.poi_id
-            const isReg  = poi.registered
-            return (
-              <div key={poi.poi_id}
-                onClick={() => selectPOI(poi)}
-                style={{
-                  background: isSel ? 'rgba(0,208,132,0.1)' : isReg ? 'rgba(255,255,255,0.02)' : 'var(--bg-card)',
-                  border: `1px solid ${isSel ? '#00D084' : isReg ? 'var(--border-subtle)' : 'var(--border-subtle)'}`,
-                  borderRadius: 'var(--radius-md)', padding:'12px 8px', textAlign:'center',
-                  cursor: isReg ? 'not-allowed' : 'pointer', opacity: isReg ? 0.45 : 1,
-                  transition:'all .15s', position:'relative',
-                  boxShadow: isSel ? '0 0 12px rgba(0,208,132,0.25)' : 'none',
-                }}
-                onMouseEnter={e => { if (!isReg && !isSel) e.currentTarget.style.borderColor='rgba(0,208,132,0.3)' }}
-                onMouseLeave={e => { if (!isReg && !isSel) e.currentTarget.style.borderColor='var(--border-subtle)' }}
-              >
-                {isSel && (
-                  <div style={{ position:'absolute', top:6, right:6, width:18, height:18, borderRadius:'50%', background:'var(--green)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:'#000', fontWeight:700 }}>✓</div>
-                )}
-                {isReg && (
-                  <div style={{ position:'absolute', top:4, left:0, right:0, fontSize:8, color:'var(--text-muted)', textAlign:'center' }}>Cadastrado</div>
-                )}
-
-                {/* Foto ou iniciais */}
-                <div style={{ width:56, height:56, borderRadius:'50%', margin:'0 auto 8px', overflow:'hidden', background: isSel?'rgba(0,208,132,0.2)':'rgba(88,166,255,0.1)', border:`2px solid ${isSel?'#00D084':'transparent'}`, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  {poi.display_img
-                    ? <img src={`data:image/jpeg;base64,${poi.display_img}`} alt={poi.display_name} style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
-                    : <span style={{ fontSize:16, fontWeight:700, color: isSel?'#00D084':'#58A6FF' }}>{initials(poi.display_name)}</span>
-                  }
-                </div>
-
-                <div style={{ fontSize:11, fontWeight:600, color: isReg?'var(--text-muted)':'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{poi.display_name}</div>
-                <div style={{ fontSize:9, color:'var(--text-muted)', fontFamily:'monospace', marginTop:2 }}>{poi.poi_id.slice(0,8)}...</div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Legenda */}
-      <div style={{ padding:'8px 20px', borderTop:'1px solid var(--border-subtle)', borderBottom:'1px solid var(--border-subtle)', display:'flex', gap:16, fontSize:10, color:'var(--text-muted)' }}>
-        {[['#00D084','Selecionado'],['#1C2128','Disponível'],['#21262D','Já cadastrado']].map(([c,l]) => (
-          <div key={l} style={{ display:'flex', alignItems:'center', gap:5 }}>
-            <div style={{ width:8, height:8, borderRadius:'50%', background:c, border:'1px solid var(--border)' }}/>
-            {l}
-          </div>
-        ))}
-      </div>
-
-      {/* Formulário de complemento (aparece ao selecionar) */}
-      {selected && (
-        <div style={{ padding:'14px 20px', background:'rgba(0,208,132,0.04)', borderBottom:'1px solid var(--border-subtle)', display:'flex', gap:14, alignItems:'flex-start' }}>
-          <div style={{ width:48, height:48, borderRadius:'50%', flexShrink:0, border:'2px solid var(--green)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,208,132,0.15)' }}>
-            {selected.display_img
-              ? <img src={`data:image/jpeg;base64,${selected.display_img}`} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
-              : <span style={{ fontSize:16, fontWeight:700, color:'var(--green)' }}>{initials(selected.display_name)}</span>
-            }
-          </div>
-          <div style={{ flex:1, display:'flex', flexWrap:'wrap', gap:10 }}>
-            <Field label="Nome *">
-              <input style={{ ...inp, fontSize:12, minWidth:140 }} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
-            </Field>
-            <Field label="Matrícula">
-              <input style={{ ...inp, fontSize:12, width:100 }} value={form.badge_number} onChange={e=>setForm(f=>({...f,badge_number:e.target.value}))} placeholder="VIG-001"/>
-            </Field>
-            <Field label="Grupo">
-              <input style={{ ...inp, fontSize:12, minWidth:120 }} value={form.group_name} onChange={e=>setForm(f=>({...f,group_name:e.target.value}))} placeholder="Ex: Vigilantes Piso 1"/>
-            </Field>
-            <Field label="Atribuir ao posto">
-              <select style={{ ...inp, fontSize:12, width:180 }} value={form.post_id} onChange={e=>setForm(f=>({...f,post_id:e.target.value}))}>
-                <option value="">Sem posto (atribuir depois)</option>
-                {posts.map(p => <option key={p.id} value={p.id}>{p.name} — {p.floor||'s/andar'}</option>)}
-              </select>
-            </Field>
-          </div>
-        </div>
-      )}
-
-      {error && <div style={{ padding:'8px 20px', fontSize:12, color:'#FF4444', background:'rgba(255,68,68,0.08)', borderBottom:'1px solid rgba(255,68,68,0.2)' }}>{error}</div>}
-
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 20px' }}>
-        <div style={{ fontSize:11, color:'var(--text-muted)' }}>
-          {selected ? `POI selecionado: ${selected.display_name}` : 'Clique em um POI para selecionar'}
-        </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:13, cursor:'pointer' }}>Cancelar</button>
-          <button onClick={save} disabled={!selected||saving} style={{ padding:'9px 20px', borderRadius:'var(--radius-sm)', border:'none', background: selected?'linear-gradient(135deg,#00D084,#00A86B)':'var(--bg-hover)', color: selected?'#000':'var(--text-muted)', fontSize:13, fontWeight:700, cursor: selected?'pointer':'not-allowed' }}>
-            {saving ? 'Cadastrando...' : 'Cadastrar vigilante'}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-// ── Modal de edição simples ───────────────────────────────────
-function EditModal({ guard, onClose, onSave }) {
-  const [form, setForm] = useState({ name:guard.name||'', badge_number:guard.badge_number||'', group_name:guard.group_name||'' })
-  const [saving, setSaving] = useState(false)
-  const [error,  setError]  = useState('')
-
-  const save = async () => {
-    if (!form.name.trim()) { setError('Nome é obrigatório'); return }
-    setSaving(true)
-    try { await updateGuard(guard.id, form); onSave() }
-    catch(e) { setError(e.response?.data?.error||'Erro ao salvar') }
+    } catch(e) { setError(e.response?.data?.error||'Erro ao cadastrar') }
     finally { setSaving(false) }
   }
 
   return (
-    <Modal title="Editar vigilante" onClose={onClose} maxWidth={420}>
-      <div style={{ padding:'18px 20px', display:'flex', flexDirection:'column', gap:14 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px', background:'var(--bg-card)', borderRadius:'var(--radius-md)', border:'1px solid var(--border-subtle)' }}>
-          <div style={{ width:44, height:44, borderRadius:'50%', overflow:'hidden', flexShrink:0, background:'rgba(88,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:700, color:'#58A6FF' }}>
-            {guard.photo_url ? <img src={guard.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : initials(guard.name)}
-          </div>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:16 }}>
+      <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', width:'100%', maxWidth:720, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:'1px solid var(--border-subtle)' }}>
           <div>
-            <div style={{ fontSize:13, fontWeight:600 }}>{guard.name}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', fontFamily:'monospace', marginTop:2 }}>{guard.forsight_poi_id}</div>
+            <div style={{ fontSize:15, fontWeight:700 }}>Selecionar POI do Forsight</div>
+            <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>Clique na foto do vigilante para cadastrá-lo no Sentinel</div>
           </div>
+          <button onClick={onClose} style={{ border:'none', background:'var(--bg-hover)', color:'var(--text-secondary)', width:28, height:28, borderRadius:6, cursor:'pointer' }}>✕</button>
         </div>
-        <Field label="Nome completo *"><input style={inp} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></Field>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-          <Field label="Matrícula"><input style={inp} value={form.badge_number} onChange={e=>setForm(f=>({...f,badge_number:e.target.value}))} placeholder="VIG-001"/></Field>
-          <Field label="Grupo"><input style={inp} value={form.group_name} onChange={e=>setForm(f=>({...f,group_name:e.target.value}))}/></Field>
-        </div>
-        {error && <div style={{ background:'rgba(255,68,68,0.1)', border:'1px solid rgba(255,68,68,0.3)', borderRadius:'var(--radius-sm)', padding:'8px 12px', fontSize:12, color:'#FF4444' }}>{error}</div>}
-      </div>
-      <div style={{ display:'flex', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:'1px solid var(--border-subtle)' }}>
-        <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:13, cursor:'pointer' }}>Cancelar</button>
-        <button onClick={save} disabled={saving} style={{ padding:'8px 20px', borderRadius:'var(--radius-sm)', border:'none', background:'linear-gradient(135deg,#00D084,#00A86B)', color:'#000', fontSize:13, fontWeight:700, cursor:'pointer' }}>{saving?'Salvando...':'Salvar'}</button>
-      </div>
-    </Modal>
-  )
-}
 
-// ── Modal de histórico ────────────────────────────────────────
-function HistoryModal({ guard, onClose }) {
-  const [dayData,   setDayData]   = useState([])
-  const [monthData, setMonthData] = useState([])
-  const [loading,   setLoading]   = useState(true)
-
-  useEffect(() => {
-    Promise.all([getGuardHistory(guard.id,'day'),getGuardHistory(guard.id,'month')])
-      .then(([d,m]) => {
-        setDayData(d.map(r=>({label:format(new Date(r.period),'HH')+'h',value:parseInt(r.max_absence_minutes)||0})))
-        setMonthData(m.map(r=>({label:format(new Date(r.period),'dd/MM'),value:parseInt(r.alarm_count)||0})))
-      }).finally(()=>setLoading(false))
-  }, [guard.id])
-
-  const sc = STATUS[guard.status] || STATUS.present
-  const getColor = v => v>=30?'#FF4444':v>=20?'#F0A500':'#00D084'
-
-  return (
-    <Modal title={`Histórico — ${guard.name}`} onClose={onClose} maxWidth={520}>
-      <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:14 }}>
-        {loading ? <div style={{ textAlign:'center', color:'var(--text-muted)', padding:20 }}>Carregando...</div> : (
+        {loading ? (
+          <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>Carregando POIs...</div>
+        ) : error && pois.length === 0 ? (
+          <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#FF4444', fontSize:13 }}>{error}</div>
+        ) : (
           <>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
-              {[
-                { label:'Alarmes/mês', value:monthData.reduce((a,b)=>a+b.value,0) },
-                { label:'Máx. hoje', value:`${dayData.reduce((a,b)=>Math.max(a,b.value),0)} min` },
-                { label:'Posto', value:guard.post_name||'—' },
-              ].map(s=>(
-                <div key={s.label} style={{ background:'var(--bg-card)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-md)', padding:'12px', textAlign:'center' }}>
-                  <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:6 }}>{s.label}</div>
-                  <div style={{ fontSize:18, fontWeight:700, color:'var(--text-primary)' }}>{s.value}</div>
+            <div style={{ padding:'12px 20px', borderBottom:'1px solid var(--border-subtle)', display:'flex', gap:8, alignItems:'center' }}>
+              <input style={{ ...inp, flex:1 }} placeholder="Buscar por nome..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              {[['all',`Todos ${pois.length}`],['available',`Disponíveis ${pois.filter(p=>!p.registered).length}`],['registered',`Cadastrados ${pois.filter(p=>p.registered).length}`]].map(([v,l]) => (
+                <button key={v} onClick={()=>setFilter(v)} style={{ padding:'7px 14px', borderRadius:'var(--radius-sm)', border:`1px solid ${filter===v?'var(--green)':'var(--border)'}`, background:filter===v?'rgba(0,208,132,0.1)':'transparent', color:filter===v?'var(--green)':'var(--text-secondary)', fontSize:12, fontWeight:filter===v?700:400, cursor:'pointer', whiteSpace:'nowrap' }}>{l}</button>
+              ))}
+            </div>
+
+            <div style={{ flex:1, overflowY:'auto', padding:16, display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))', gap:10, alignContent:'start' }}>
+              {filtered.map(poi => (
+                <div key={poi.poi_id} onClick={() => { if (!poi.registered) { setSelected(poi); setForm(f=>({...f,name:poi.display_name})) }}}
+                  style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:10, borderRadius:'var(--radius-md)', cursor:poi.registered?'default':'pointer', border:`2px solid ${selected?.poi_id===poi.poi_id?'#00D084':poi.registered?'rgba(88,166,255,0.2)':'var(--border-subtle)'}`, background:selected?.poi_id===poi.poi_id?'rgba(0,208,132,0.08)':poi.registered?'rgba(88,166,255,0.04)':'var(--bg-card)', position:'relative', transition:'all .15s', opacity:poi.registered?0.7:1 }}>
+                  {selected?.poi_id===poi.poi_id && <div style={{ position:'absolute', top:4, right:4, width:16, height:16, borderRadius:'50%', background:'#00D084', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10 }}>✓</div>}
+                  {poi.registered && <div style={{ position:'absolute', top:4, left:4, fontSize:9, background:'rgba(88,166,255,0.8)', color:'#fff', padding:'1px 5px', borderRadius:3, fontWeight:600 }}>Cadastrado</div>}
+                  <div style={{ width:60, height:60, borderRadius:'50%', overflow:'hidden', background:'var(--bg-hover)', flexShrink:0 }}>
+                    {poi.display_img ? <img src={`data:image/jpeg;base64,${poi.display_img}`} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:700,color:'var(--text-muted)'}}>{initials(poi.display_name)}</div>}
+                  </div>
+                  <div style={{ fontSize:10, fontWeight:500, textAlign:'center', color:'var(--text-secondary)', lineHeight:1.3 }}>{poi.display_name}</div>
+                  <div style={{ fontSize:9, color:'var(--text-muted)', fontFamily:'monospace' }}>{poi.poi_id.slice(0,8)}...</div>
                 </div>
               ))}
             </div>
-            <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-md)', padding:'14px' }}>
-              <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:10 }}>Ausência hoje por hora (min)</div>
-              <ResponsiveContainer width="100%" height={80}>
-                <BarChart data={dayData} margin={{top:0,right:0,left:-30,bottom:0}}>
-                  <XAxis dataKey="label" tick={{fontSize:8,fill:'#484F58'}} tickLine={false} axisLine={false}/>
-                  <Tooltip contentStyle={{background:'#1C2128',border:'1px solid #30363D',borderRadius:6,fontSize:11}}/>
-                  <Bar dataKey="value" radius={[2,2,0,0]}>{dayData.map((e,i)=><Cell key={i} fill={getColor(e.value)}/>)}</Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-md)', padding:'14px' }}>
-              <div style={{ fontSize:10, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:10 }}>Alarmes por dia — mês atual</div>
-              <ResponsiveContainer width="100%" height={70}>
-                <BarChart data={monthData} margin={{top:0,right:0,left:-30,bottom:0}}>
-                  <XAxis dataKey="label" tick={{fontSize:8,fill:'#484F58'}} tickLine={false} axisLine={false} interval={3}/>
-                  <Tooltip contentStyle={{background:'#1C2128',border:'1px solid #30363D',borderRadius:6,fontSize:11}}/>
-                  <Bar dataKey="value" fill="#00D084" radius={[2,2,0,0]}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ background:'var(--bg-card)', border:`1px solid ${sc.color}33`, borderRadius:'var(--radius-md)', padding:'12px 14px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <div>
-                <div style={{ fontSize:11, fontWeight:600 }}>Status atual</div>
-                <div style={{ fontSize:11, color:sc.color, marginTop:2 }}>{sc.label} {guard.absence_minutes!=null?`· ${guard.absence_minutes} min`:''}</div>
+
+            {selected && (
+              <div style={{ padding:'14px 20px', borderTop:'1px solid var(--border-subtle)', background:'var(--bg-card)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+                  <div style={{ width:40, height:40, borderRadius:'50%', overflow:'hidden', flexShrink:0 }}>
+                    {selected.display_img ? <img src={`data:image/jpeg;base64,${selected.display_img}`} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : <div style={{width:'100%',height:'100%',background:'var(--bg-hover)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:'var(--text-muted)'}}>{initials(selected.display_name)}</div>}
+                  </div>
+                  <div style={{ flex:'1 1 140px', minWidth:0 }}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:4 }}>Nome *</label>
+                    <input style={{ ...inp, width:'100%' }} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
+                  </div>
+                  <div style={{ flex:'0 0 90px' }}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:4 }}>Matrícula</label>
+                    <input style={inp} value={form.badge_number} onChange={e=>setForm(f=>({...f,badge_number:e.target.value}))} placeholder="VIG-001"/>
+                  </div>
+                  <div style={{ flex:'0 0 110px' }}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:4 }}>Grupo</label>
+                    <input style={inp} value={form.group_name} onChange={e=>setForm(f=>({...f,group_name:e.target.value}))} placeholder="Ex: Vigilantes Piso 1"/>
+                  </div>
+                  <div style={{ flex:'0 0 160px' }}>
+                    <label style={{ display:'block', fontSize:9, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:4 }}>Atribuir ao posto</label>
+                    <select style={{ ...inp, width:'100%' }} value={form.post_id} onChange={e=>setForm(f=>({...f,post_id:e.target.value}))}>
+                      <option value="">Sem posto</option>
+                      {posts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {error && <div style={{ marginTop:8, fontSize:11, color:'#FF4444' }}>{error}</div>}
               </div>
-              <div style={{ fontSize:11, color:'var(--text-muted)' }}>Mat: {guard.badge_number||'—'}</div>
-            </div>
+            )}
           </>
         )}
+
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 20px', borderTop:'1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+            {selected ? `POI selecionado: ${selected.display_name}` : 'Clique em um POI para selecionar'}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:13, cursor:'pointer' }}>Cancelar</button>
+            <button onClick={save} disabled={saving||!selected} style={{ padding:'8px 20px', borderRadius:'var(--radius-sm)', border:'none', background:selected?'linear-gradient(135deg,#00D084,#00A86B)':'var(--bg-hover)', color:selected?'#000':'var(--text-muted)', fontSize:13, fontWeight:700, cursor:selected?'pointer':'not-allowed' }}>{saving?'Cadastrando...':'Cadastrar vigilante'}</button>
+          </div>
+        </div>
       </div>
-      <div style={{ display:'flex', justifyContent:'flex-end', padding:'12px 20px', borderTop:'1px solid var(--border-subtle)' }}>
-        <button onClick={onClose} style={{ padding:'8px 20px', borderRadius:'var(--radius-sm)', border:'none', background:'var(--bg-hover)', color:'var(--text-primary)', fontSize:13, cursor:'pointer' }}>Fechar</button>
-      </div>
-    </Modal>
+    </div>
   )
 }
 
-// ── Página principal ──────────────────────────────────────────
-export default function Guards() {
-  const [guards,    setGuards]    = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [search,    setSearch]    = useState('')
-  const [showGallery, setShowGallery] = useState(false)
-  const [showEdit,    setShowEdit]    = useState(false)
-  const [showHist,    setShowHist]    = useState(false)
-  const [editing,     setEditing]     = useState(null)
-  const [histGuard,   setHistGuard]   = useState(null)
+// ─── LISTA DE VIGILANTES CADASTRADOS ────────────────────────────────────────
+function GuardList({ onEdit }) {
+  const [guards,  setGuards]  = useState([])
+  const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setGuards(await getGuards()) } finally { setLoading(false) }
+    try { setGuards(await getGuards()) }
+    finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const filtered = guards.filter(g =>
-    g.name.toLowerCase().includes(search.toLowerCase()) ||
-    (g.badge_number||'').includes(search)
+  if (loading) return <div style={{ color:'var(--text-muted)', fontSize:13 }}>Carregando...</div>
+
+  return (
+    <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+      {guards.length === 0 && (
+        <div style={{ padding:32, textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>Nenhum vigilante cadastrado</div>
+      )}
+      {guards.map((g, i) => (
+        <div key={g.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', borderBottom: i < guards.length-1 ? '1px solid var(--border-subtle)' : 'none', transition:'background .15s' }}
+          onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'}
+          onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+          <div style={{ width:36, height:36, borderRadius:'50%', background:'rgba(88,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'#58A6FF', overflow:'hidden', flexShrink:0 }}>
+            {g.photo_url ? <img src={g.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/> : initials(g.name)}
+          </div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:13, fontWeight:600 }}>{g.name}</div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>Mat: {g.badge_number||'—'} · {g.group_name||'Sem grupo'}</div>
+          </div>
+          <button onClick={() => onEdit(g)} style={{ padding:'6px 12px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:12, cursor:'pointer' }}>Editar</button>
+        </div>
+      ))}
+    </div>
   )
+}
 
-  const SC_MAP = { alarm:0, warning:1, present:2 }
-  const sorted = [...filtered].sort((a,b) => (SC_MAP[a.status]??3)-(SC_MAP[b.status]??3))
+// ─── PÁGINA PRINCIPAL ────────────────────────────────────────────────────────
+export default function Guards() {
+  const [tab,          setTab]          = useState('panel')
+  const [showRegister, setShowRegister] = useState(false)
+  const [editGuard,    setEditGuard]    = useState(null)
+  const [refreshKey,   setRefreshKey]   = useState(0)
 
-  const closeGallery = () => { setShowGallery(false); load() }
-  const closeEdit    = () => { setShowEdit(false); setEditing(null); load() }
-
-  const ActionBtn = ({ title, onClick, children }) => (
-    <button onClick={onClick} title={title} style={{ width:30, height:30, borderRadius:6, border:'1px solid var(--border)', background:'transparent', color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', transition:'all .15s' }}
-      onMouseEnter={e=>{e.currentTarget.style.background='var(--bg-hover)';e.currentTarget.style.color='var(--text-primary)'}}
-      onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.color='var(--text-muted)'}}>
-      {children}
-    </button>
-  )
+  const reload = () => setRefreshKey(k => k+1)
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--border-subtle)', background:'var(--bg-secondary)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div>
           <div style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.5px' }}>Vigilantes</div>
-          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Gestão de vigilantes e monitoramento individual</div>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Painel operacional e cadastro de vigilantes</div>
         </div>
-        <button onClick={() => setShowGallery(true)} style={{ display:'flex', alignItems:'center', gap:6, padding:'9px 16px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.1)', color:'var(--green)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
-          <span style={{ fontSize:16 }}>+</span> Novo Vigilante
-        </button>
+        {tab === 'register' && (
+          <button onClick={() => setShowRegister(true)} style={{ display:'flex', alignItems:'center', gap:6, padding:'9px 16px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.1)', color:'var(--green)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+            <span style={{ fontSize:16 }}>+</span> Novo vigilante
+          </button>
+        )}
       </div>
 
-      <div style={{ padding:'14px 24px', borderBottom:'1px solid var(--border-subtle)', background:'var(--bg-secondary)' }}>
-        <div style={{ position:'relative', maxWidth:400 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input style={{ ...inp, paddingLeft:32, background:'var(--bg-card)' }} placeholder="Buscar por nome ou matrícula..." value={search} onChange={e=>setSearch(e.target.value)}/>
-        </div>
+      {/* Tabs */}
+      <div style={{ display:'flex', borderBottom:'1px solid var(--border-subtle)', background:'var(--bg-secondary)', padding:'0 24px' }}>
+        {[['panel','📊 Painel'],['register','👤 Cadastro']].map(([key,label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            padding:'10px 20px', border:'none', background:'transparent',
+            color: tab===key ? 'var(--green)' : 'var(--text-muted)',
+            fontSize:13, fontWeight: tab===key ? 700 : 400, cursor:'pointer',
+            borderBottom: tab===key ? '2px solid var(--green)' : '2px solid transparent',
+            marginBottom:-1,
+          }}>{label}</button>
+        ))}
       </div>
 
-      <div style={{ flex:1, overflowY:'auto', padding:'0 24px 24px' }}>
-        <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', overflow:'hidden', marginTop:16 }}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 100px 180px 1fr 100px 80px', padding:'10px 16px', borderBottom:'1px solid var(--border-subtle)', fontSize:11, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px' }}>
-            <span>Nome</span><span>Matrícula</span><span>POI ID</span><span>Posto</span><span>Status</span><span>Ações</span>
-          </div>
-
-          {loading && <div style={{ padding:24, textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>Carregando...</div>}
-
-          {sorted.map((g, i) => {
-            const sc = STATUS[g.status] || { color:'#484F58', label:'OFFLINE' }
-            return (
-              <div key={g.id} style={{ display:'grid', gridTemplateColumns:'1fr 100px 180px 1fr 100px 80px', padding:'12px 16px', borderBottom: i<sorted.length-1?'1px solid var(--border-subtle)':'none', fontSize:12, alignItems:'center', transition:'background .15s' }}
-                onMouseEnter={e=>e.currentTarget.style.background='var(--bg-card)'}
-                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <div style={{ width:36, height:36, borderRadius:'50%', background:`${sc.color}22`, border:`1.5px solid ${sc.color}44`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:sc.color, flexShrink:0, overflow:'hidden' }}>
-                    {g.photo_url?<img src={g.photo_url} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>:initials(g.name)}
-                  </div>
-                  <span style={{ fontWeight:600 }}>{g.name}</span>
-                </div>
-                <span style={{ color:'var(--text-secondary)', fontFamily:'monospace', fontSize:12 }}>{g.badge_number||'—'}</span>
-                <span style={{ color:'var(--text-muted)', fontFamily:'monospace', fontSize:11 }}>{g.forsight_poi_id?.slice(0,20)}...</span>
-                <span style={{ color:'var(--text-secondary)' }}>{g.post_name||'—'}</span>
-                <span style={{ padding:'3px 8px', borderRadius:4, background:`${sc.color}18`, color:sc.color, fontSize:10, fontWeight:700, letterSpacing:'0.3px', display:'inline-block' }}>{sc.label}</span>
-                <div style={{ display:'flex', gap:6 }}>
-                  <ActionBtn title="Histórico" onClick={()=>{setHistGuard(g);setShowHist(true)}}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  </ActionBtn>
-                  <ActionBtn title="Editar" onClick={()=>{setEditing(g);setShowEdit(true)}}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  </ActionBtn>
-                </div>
-              </div>
-            )
-          })}
-
-          {!loading && sorted.length === 0 && (
-            <div style={{ padding:'40px 24px', textAlign:'center', color:'var(--text-muted)' }}>
-              <div style={{ fontSize:14, fontWeight:600, color:'var(--text-secondary)', marginBottom:6 }}>Nenhum vigilante cadastrado</div>
-              <div style={{ fontSize:12, marginBottom:16 }}>Clique em "+ Novo Vigilante" para selecionar da galeria de POIs do Forsight</div>
-              <button onClick={()=>setShowGallery(true)} style={{ padding:'9px 18px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.1)', color:'var(--green)', fontSize:13, cursor:'pointer' }}>Abrir galeria de POIs</button>
-            </div>
-          )}
-        </div>
+      <div style={{ flex:1, overflowY:'auto', padding:'20px 24px' }}>
+        {tab === 'panel' && <GuardPanel key={refreshKey}/>}
+        {tab === 'register' && <GuardList key={refreshKey} onEdit={setEditGuard}/>}
       </div>
 
-      {showGallery && <POIGallery onClose={()=>setShowGallery(false)} onSave={closeGallery}/>}
-      {showEdit && editing && <EditModal guard={editing} onClose={closeEdit} onSave={closeEdit}/>}
-      {showHist && histGuard && <HistoryModal guard={histGuard} onClose={()=>{setShowHist(false);setHistGuard(null)}}/>}
+      {showRegister && <RegisterModal onClose={() => setShowRegister(false)} onSave={() => { setShowRegister(false); reload() }}/>}
+      {editGuard && <EditModal guard={editGuard} onClose={() => setEditGuard(null)} onSave={() => { setEditGuard(null); reload() }}/>}
     </div>
   )
 }
