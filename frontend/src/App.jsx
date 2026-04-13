@@ -10,7 +10,8 @@ const Posts      = lazy(() => import('./pages/Posts'))
 const History    = lazy(() => import('./pages/History'))
 const Settings   = lazy(() => import('./pages/Settings'))
 const Registers  = lazy(() => import('./pages/Registers'))
-const Operation  = lazy(() => import('./pages/Operation'))
+const Operation      = lazy(() => import('./pages/Operation'))
+const DailyOperation = lazy(() => import('./pages/DailyOperation'))
 const Shifts     = lazy(() => import('./pages/Shifts'))
 
 // ── Ícones ────────────────────────────────────────────────────
@@ -29,10 +30,11 @@ const I = {
 
 const NAV = [
   { to:'/dashboard', label:'Dashboard',  icon: I.dashboard },
-  { to:'/operation', label:'Operação',   icon: I.dashboard },
+  { to:'/operation',       label:'Monitoramento', icon: I.dashboard },
+  { to:'/daily-operation', label:'Alocação',     icon: I.shifts    },
   { to:'/history',   label:'Histórico',  icon: I.history   },
   { to:'/registers', label:'Cadastros',  icon: I.posts     },
-  { to:'/settings',  label:'Parâmetros', icon: I.settings  },
+
 ]
 
 function Sidebar() {
@@ -190,7 +192,8 @@ function Layout() {
         }>
           <Routes>
             <Route path="/dashboard"  element={<Dashboard/>}/>
-            <Route path="/operation"  element={<Operation/>}/>
+            <Route path="/operation"      element={<Operation/>}/>
+            <Route path="/daily-operation" element={<DailyOperation/>}/>
             <Route path="/history"    element={<History/>}/>
             <Route path="/registers"  element={<Registers/>}/>
             <Route path="/settings"   element={<Settings/>}/>

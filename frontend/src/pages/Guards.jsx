@@ -469,11 +469,7 @@ export default function Guards() {
           <div style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.5px' }}>Vigilantes</div>
           <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Painel operacional e cadastro de vigilantes</div>
         </div>
-        {tab === 'register' && (
-          <button onClick={() => setShowRegister(true)} style={{ display:'flex', alignItems:'center', gap:6, padding:'9px 16px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.1)', color:'var(--green)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
-            <span style={{ fontSize:16 }}>+</span> Novo vigilante
-          </button>
-        )}
+
       </div>
 
       {/* Tabs */}

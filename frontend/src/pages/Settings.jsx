@@ -258,6 +258,7 @@ export default function Settings() {
               <TextField configKey="forsight_username" label="Usuário Forsight" hint="Nome de usuário para autenticação"  placeholder="apifortytest"/>
               <TextField configKey="forsight_password" label="Senha Forsight"   hint="Senha do usuário Forsight"          placeholder="••••••••" secret/>
               <SliderField configKey="polling_interval_seconds" label="Intervalo de recálculo" hint="Com que frequência recalcular ausências" min={10} max={120} step={5} unit="s"/>
+              <SliderField configKey="watchlist_sync_interval" label="Sincronização da watchlist" hint="Com que frequência sincronizar vigilantes do Fortify" min={1} max={60} step={1} unit="min"/>
             </div>
           </div>
         )}
