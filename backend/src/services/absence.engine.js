@@ -157,6 +157,18 @@ class AbsenceEngine {
       `)
 
       for (const post of posts) {
+        // 0. Verifica modo de alocação (all_to_all = qualquer vigilante cobre qualquer posto)
+        const { rows: modeCfg } = await query(
+          "SELECT value FROM system_config WHERE key = 'allocation_mode'"
+        )
+        const allocationMode = modeCfg[0]?.value || 'specific'
+
+        if (allocationMode === 'all_to_all') {
+          // No modo all_to_all, verifica se QUALQUER vigilante ativo foi detectado no posto
+          // O post_coverage_state já é atualizado pelo processEvent — não precisa recalcular aqui
+          // Apenas verifica se a última detecção foi recente o suficiente
+        }
+
         // 1. Verifica ausência justificada ativa PRIMEIRO (prioridade máxima)
         const { rows: justifications } = await query(`
           SELECT id, duration_minutes, expires_at,

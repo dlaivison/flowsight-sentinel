@@ -6,6 +6,7 @@ const { WebSocketServer } = require('ws');
 
 const { pool }      = require('./db');
 const absenceEngine = require('./services/absence.engine');
+const watchlistSync = require('./services/watchlist.sync');
 const alarmService  = require('./services/alarm.service');
 
 const app    = express();
@@ -67,6 +68,7 @@ server.listen(PORT, async () => {
   try {
     await pool.query('SELECT 1');
     console.log('[DB] PostgreSQL conectado ✓');
+    await watchlistSync.start();
     await absenceEngine.start();
   } catch (err) {
     console.error('[FATAL]', err.message);

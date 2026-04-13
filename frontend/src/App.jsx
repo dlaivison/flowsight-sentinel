@@ -9,6 +9,8 @@ const Guards     = lazy(() => import('./pages/Guards'))
 const Posts      = lazy(() => import('./pages/Posts'))
 const History    = lazy(() => import('./pages/History'))
 const Settings   = lazy(() => import('./pages/Settings'))
+const Registers  = lazy(() => import('./pages/Registers'))
+const Operation  = lazy(() => import('./pages/Operation'))
 const Shifts     = lazy(() => import('./pages/Shifts'))
 
 // ── Ícones ────────────────────────────────────────────────────
@@ -27,10 +29,9 @@ const I = {
 
 const NAV = [
   { to:'/dashboard', label:'Dashboard',  icon: I.dashboard },
-  { to:'/guards',    label:'Vigilantes', icon: I.guards    },
-  { to:'/posts',     label:'Postos',     icon: I.posts     },
+  { to:'/operation', label:'Operação',   icon: I.dashboard },
   { to:'/history',   label:'Histórico',  icon: I.history   },
-  { to:'/shifts',    label:'Turnos',     icon: I.shifts    },
+  { to:'/registers', label:'Cadastros',  icon: I.posts     },
   { to:'/settings',  label:'Parâmetros', icon: I.settings  },
 ]
 
@@ -188,13 +189,15 @@ function Layout() {
           </div>
         }>
           <Routes>
-            <Route path="/dashboard" element={<Dashboard/>}/>
-            <Route path="/guards"    element={<Guards/>}/>
-            <Route path="/posts"     element={<Posts/>}/>
-            <Route path="/history"   element={<History/>}/>
-            <Route path="/shifts"    element={<Shifts/>}/>
-            <Route path="/settings"  element={<Settings/>}/>
-            <Route path="*"          element={<Navigate to="/dashboard" replace/>}/>
+            <Route path="/dashboard"  element={<Dashboard/>}/>
+            <Route path="/operation"  element={<Operation/>}/>
+            <Route path="/history"    element={<History/>}/>
+            <Route path="/registers"  element={<Registers/>}/>
+            <Route path="/settings"   element={<Settings/>}/>
+            <Route path="/guards"     element={<Guards/>}/>
+            <Route path="/posts"      element={<Posts/>}/>
+            <Route path="/shifts"     element={<Shifts/>}/>
+            <Route path="*"           element={<Navigate to="/operation" replace/>}/>
           </Routes>
         </Suspense>
       </main>
