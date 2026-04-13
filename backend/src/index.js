@@ -47,6 +47,7 @@ app.use('/api/cameras',   require('./api/cameras.routes'));
 app.use('/api/forsight',  require('./api/forsight.routes'));
 app.use('/api/shifts',         require('./api/shifts.routes'));
 app.use('/api/justifications', require('./api/justifications.routes'));
+app.use('/api/reports',        require('./api/reports.routes'));
 
 app.get('/health', async (req, res) => {
   try {

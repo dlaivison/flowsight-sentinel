@@ -259,6 +259,15 @@ export default function Settings() {
               <TextField configKey="forsight_password" label="Senha Forsight"   hint="Senha do usuário Forsight"          placeholder="••••••••" secret/>
               <SliderField configKey="polling_interval_seconds" label="Intervalo de recálculo" hint="Com que frequência recalcular ausências" min={10} max={120} step={5} unit="s"/>
               <SliderField configKey="watchlist_sync_interval" label="Sincronização da watchlist" hint="Com que frequência sincronizar vigilantes do Fortify" min={1} max={60} step={1} unit="min"/>
+              <Field label="Modo de alocação" hint="Specific: vigilante por posto | All to All: qualquer vigilante cobre qualquer posto">
+                <select
+                  defaultValue={config.allocation_mode || 'specific'}
+                  onChange={e => saveKey('allocation_mode', e.target.value)}
+                  style={{ padding:'7px 12px', background:'var(--bg-primary)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-primary)', fontSize:12, outline:'none' }}>
+                  <option value="specific">Específico — vigilante por posto</option>
+                  <option value="all_to_all">Todos para Tudo — qualquer vigilante cobre qualquer posto</option>
+                </select>
+              </Field>
             </div>
           </div>
         )}

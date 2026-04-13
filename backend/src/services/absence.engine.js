@@ -156,17 +156,48 @@ class AbsenceEngine {
         WHERE p.is_active = TRUE
       `)
 
+      // Lê modo de alocação uma vez fora do loop
+      const { rows: modeCfg } = await query(
+        "SELECT value FROM system_config WHERE key = 'allocation_mode'"
+      )
+      const allocationMode = modeCfg[0]?.value || 'specific'
+
       for (const post of posts) {
-        // 0. Verifica modo de alocação (all_to_all = qualquer vigilante cobre qualquer posto)
-        const { rows: modeCfg } = await query(
-          "SELECT value FROM system_config WHERE key = 'allocation_mode'"
-        )
-        const allocationMode = modeCfg[0]?.value || 'specific'
+        // 0. Verifica modo de alocação
 
         if (allocationMode === 'all_to_all') {
-          // No modo all_to_all, verifica se QUALQUER vigilante ativo foi detectado no posto
-          // O post_coverage_state já é atualizado pelo processEvent — não precisa recalcular aqui
-          // Apenas verifica se a última detecção foi recente o suficiente
+          // No modo all_to_all, qualquer vigilante da watchlist cobre qualquer posto
+          // Alarme só dispara se NENHUM vigilante for detectado no prazo
+          // Usa o last_detected_at do post_coverage_state diretamente
+          const now        = new Date()
+          const lastSeen   = post.last_detected_at ? new Date(post.last_detected_at) : null
+          const absenceSec = lastSeen ? Math.floor((now - lastSeen) / 1000) : 99999
+          const threshold  = post.absence_threshold_seconds || 60
+          const warning    = post.warning_threshold_seconds || 30
+
+          let newStatus = 'covered'
+          if (absenceSec >= threshold) newStatus = 'alarm'
+          else if (absenceSec >= warning) newStatus = 'warning'
+
+          await query(`
+            INSERT INTO post_coverage_state (post_id, status, absence_seconds, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (post_id) DO UPDATE SET
+              status = EXCLUDED.status, absence_seconds = EXCLUDED.absence_seconds, updated_at = NOW()
+          `, [post.id, newStatus, absenceSec === 99999 ? null : absenceSec])
+
+          if (newStatus === 'alarm' && post.current_status !== 'alarm') {
+            await alarmService.triggerPostAlarm({
+              postId:           post.id,
+              postName:         post.name,
+              absenceSeconds:   absenceSec,
+              thresholdSeconds: threshold,
+              lastGuardId:      post.last_guard_id,
+              lastGuardName:    post.last_guard_name,
+              lastCameraId:     post.last_camera_id,
+            })
+          }
+          continue
         }
 
         // 1. Verifica ausência justificada ativa PRIMEIRO (prioridade máxima)
