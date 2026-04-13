@@ -250,13 +250,13 @@ export default function Settings() {
         {tab === 'integration' && (
           <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)' }}>
             <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize:14, fontWeight:700 }}>Integração Corsight / Forsight</div>
+              <div style={{ fontSize:14, fontWeight:700 }}>Integração Corsight / Fortify</div>
               <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:3 }}>Conexão com a API do Fortify</div>
             </div>
             <div style={{ padding:'0 20px' }}>
-              <TextField configKey="forsight_api_url"  label="URL da API"       hint="Endereço base do servidor Forsight" placeholder="https://127.0.0.1"/>
-              <TextField configKey="forsight_username" label="Usuário Forsight" hint="Nome de usuário para autenticação"  placeholder="apifortytest"/>
-              <TextField configKey="forsight_password" label="Senha Forsight"   hint="Senha do usuário Forsight"          placeholder="••••••••" secret/>
+              <TextField configKey="fortify_api_url"  label="URL da API"       hint="Endereço base do servidor Fortify" placeholder="https://127.0.0.1"/>
+              <TextField configKey="fortify_username" label="Usuário Fortify" hint="Nome de usuário para autenticação"  placeholder="apifortytest"/>
+              <TextField configKey="fortify_password" label="Senha Fortify"   hint="Senha do usuário Fortify"          placeholder="••••••••" secret/>
               <SliderField configKey="polling_interval_seconds" label="Intervalo de recálculo" hint="Com que frequência recalcular ausências" min={10} max={120} step={5} unit="s"/>
               <SliderField configKey="watchlist_sync_interval" label="Sincronização da watchlist" hint="Com que frequência sincronizar vigilantes do Fortify" min={1} max={60} step={1} unit="min"/>
               <Field label="Modo de alocação" hint="Specific: vigilante por posto | All to All: qualquer vigilante cobre qualquer posto">
@@ -407,7 +407,7 @@ export default function Settings() {
           </div>
           <div style={{ textAlign:'right', fontSize:11, color:'var(--text-muted)' }}>
             <div>Node.js + React + PostgreSQL</div>
-            <div>Corsight/Forsight API v1.4.0</div>
+            <div>Corsight/Fortify API v1.4.0</div>
           </div>
         </div>
       </div>

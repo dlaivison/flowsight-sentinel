@@ -42,12 +42,12 @@ export const updateConfig         = (k, v)  => api.put(`/api/config/${k}`, { val
 
 export default api
 
-export const getPoisGallery = () => api.get('/api/forsight/pois-gallery')
+export const getPoisGallery = () => api.get('/api/fortify/pois-gallery')
 
 export const removeGuardFromPost = (postId, guardId) => api.post(`/api/posts/${postId}/remove-guard`, { guard_id: guardId })
 
-export const getWatchlists     = ()     => api.get('/api/forsight/watchlists')
-export const getWatchlistPois  = ()     => api.get('/api/forsight/watchlist-pois')
+export const getWatchlists     = ()     => api.get('/api/fortify/watchlists')
+export const getWatchlistPois  = ()     => api.get('/api/fortify/watchlist-pois')
 
 // Shifts
 export const getShiftTypes       = ()        => api.get('/api/shifts/types')

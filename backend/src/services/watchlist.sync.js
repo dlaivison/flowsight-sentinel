@@ -1,5 +1,5 @@
 const { query }  = require('../db')
-const forsight   = require('./forsight.service')
+const fortify   = require('./fortify.service')
 
 class WatchlistSync {
   constructor() {
@@ -46,11 +46,11 @@ class WatchlistSync {
         return
       }
 
-      const token = await forsight.getToken()
+      const token = await fortify.getToken()
       const BATCH = 30
 
       // 1. Busca todos os POIs
-      const listResp = await forsight.client.get('/poi_service/poi_db/poi/', {
+      const listResp = await fortify.client.get('/poi_service/poi_db/poi/', {
         headers: { Authorization: `Bearer ${token}` },
         params:  { limit: 500 },
       })
@@ -66,7 +66,7 @@ class WatchlistSync {
       for (let i = 0; i < allIds.length; i += BATCH) {
         const batch = allIds.slice(i, i + BATCH)
         try {
-          const detailResp = await forsight.client.post(
+          const detailResp = await fortify.client.post(
             '/poi_service/poi_db/poi/get/',
             { get_crops: false, get_faces: false, pois: batch },
             { headers: { Authorization: `Bearer ${token}` } }
@@ -92,7 +92,7 @@ class WatchlistSync {
       for (let i = 0; i < filteredIds.length; i += BATCH) {
         const batch = filteredIds.slice(i, i + BATCH)
         try {
-          const photoResp = await forsight.client.post(
+          const photoResp = await fortify.client.post(
             '/poi_service/poi_db/poi/get/',
             { get_crops: true, get_faces: false, pois: batch },
             { headers: { Authorization: `Bearer ${token}` } }
@@ -114,9 +114,9 @@ class WatchlistSync {
       for (const poi of withPhotos) {
         const photoUrl = poi.display_img ? `data:image/jpeg;base64,${poi.display_img}` : null
         const { rows } = await query(`
-          INSERT INTO guards (forsight_poi_id, name, photo_url, is_active)
+          INSERT INTO guards (fortify_poi_id, name, photo_url, is_active)
           VALUES ($1, $2, $3, TRUE)
-          ON CONFLICT (forsight_poi_id) DO UPDATE SET
+          ON CONFLICT (fortify_poi_id) DO UPDATE SET
             name       = EXCLUDED.name,
             photo_url  = COALESCE(EXCLUDED.photo_url, guards.photo_url),
             is_active  = TRUE,
@@ -132,7 +132,7 @@ class WatchlistSync {
         const placeholders = poiIds.map((_, i) => `$${i+1}`).join(',')
         const { rowCount } = await query(`
           UPDATE guards SET is_active = FALSE, updated_at = NOW()
-          WHERE forsight_poi_id NOT IN (${placeholders}) AND is_active = TRUE
+          WHERE fortify_poi_id NOT IN (${placeholders}) AND is_active = TRUE
         `, poiIds)
         deactivated = rowCount
       }

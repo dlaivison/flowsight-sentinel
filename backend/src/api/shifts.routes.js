@@ -124,7 +124,7 @@ router.get('/schedule', async (req, res, next) => {
           g.name        AS guard_name,
           g.photo_url,
           g.badge_number,
-          g.forsight_poi_id,
+          g.fortify_poi_id,
           p.name        AS post_name,
           p.floor
         FROM shift_schedules ss
@@ -136,7 +136,7 @@ router.get('/schedule', async (req, res, next) => {
 
       // Vigilantes ainda não escalados neste turno
       const { rows: unscheduled } = await query(`
-        SELECT g.id, g.name, g.photo_url, g.badge_number, g.forsight_poi_id
+        SELECT g.id, g.name, g.photo_url, g.badge_number, g.fortify_poi_id
         FROM guards g
         WHERE g.is_active = TRUE
           AND g.id NOT IN (
@@ -185,8 +185,7 @@ router.post('/schedule', async (req, res, next) => {
       INSERT INTO shift_schedules
         (shift_type_id, guard_id, post_id, date, status, notes, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (shift_type_id, guard_id, date) DO UPDATE SET
-        post_id    = EXCLUDED.post_id,
+      ON CONFLICT (shift_type_id, guard_id, post_id, date) DO UPDATE SET
         status     = EXCLUDED.status,
         notes      = EXCLUDED.notes,
         updated_at = NOW()
@@ -217,7 +216,7 @@ router.get('/active-guards', async (req, res, next) => {
         ss.post_id,
         ss.status,
         g.name          AS guard_name,
-        g.forsight_poi_id,
+        g.fortify_poi_id,
         g.photo_url,
         g.badge_number,
         p.name          AS post_name,

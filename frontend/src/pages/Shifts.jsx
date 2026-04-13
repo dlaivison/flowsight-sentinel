@@ -335,7 +335,7 @@ function ShiftBlock({ shift, date, posts, onRefresh }) {
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function Shifts() {
-  const [tab,         setTab]         = useState('schedule') // schedule | config
+  const [tab,         setTab]         = useState('config') // config only
   const [shiftTypes,  setShiftTypes]  = useState([])
   const [schedule,    setSchedule]    = useState(null)
   const [posts,       setPosts]       = useState([])
@@ -384,7 +384,7 @@ export default function Shifts() {
 
       {/* Tabs */}
       <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--border-subtle)', background:'var(--bg-secondary)', padding:'0 24px' }}>
-        {[['schedule','📅 Escala do Dia'],['config','⚙ Configurar Turnos']].map(([key,label]) => (
+        {[['config','⚙ Configurar Turnos']].map(([key,label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             padding:'10px 20px', border:'none', background:'transparent',
             color: tab===key ? 'var(--green)' : 'var(--text-muted)',

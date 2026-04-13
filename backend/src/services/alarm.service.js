@@ -151,7 +151,7 @@ class AlarmService {
   async _getAlarmWithDetails(alarmId) {
     const { rows } = await query(`
       SELECT al.*, g.name AS guard_name, g.photo_url AS guard_photo_url,
-             g.badge_number, g.forsight_poi_id,
+             g.badge_number, g.fortify_poi_id,
              p.name AS post_name, p.floor, p.absence_threshold_seconds
       FROM alarms al
       JOIN posts p ON p.id = al.post_id

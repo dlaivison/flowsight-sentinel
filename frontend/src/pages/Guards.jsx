@@ -317,7 +317,7 @@ function RegisterModal({ onClose, onSave }) {
     setSaving(true)
     try {
       const res = await createGuard({
-        forsight_poi_id: selected.poi_id,
+        fortify_poi_id: selected.poi_id,
         name:            form.name,
         badge_number:    form.badge_number,
         group_name:      form.group_name,
@@ -335,7 +335,7 @@ function RegisterModal({ onClose, onSave }) {
       <div style={{ background:'var(--bg-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', width:'100%', maxWidth:720, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:'1px solid var(--border-subtle)' }}>
           <div>
-            <div style={{ fontSize:15, fontWeight:700 }}>Selecionar POI do Forsight</div>
+            <div style={{ fontSize:15, fontWeight:700 }}>Selecionar POI do Fortify</div>
             <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>Clique na foto do vigilante para cadastrá-lo no Sentinel</div>
           </div>
           <button onClick={onClose} style={{ border:'none', background:'var(--bg-hover)', color:'var(--text-secondary)', width:28, height:28, borderRadius:6, cursor:'pointer' }}>✕</button>

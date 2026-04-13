@@ -276,7 +276,7 @@ export default function Posts() {
         {!loading && posts.length===0 && (
           <div style={{ textAlign:'center', padding:'60px 20px', color:'var(--text-muted)' }}>
             <div style={{ fontSize:14, fontWeight:600, color:'var(--text-secondary)', marginBottom:8 }}>Nenhum posto cadastrado</div>
-            <button onClick={handleSync} style={{ padding:'9px 18px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.1)', color:'var(--green)', fontSize:13, cursor:'pointer' }}>↺ Sincronizar câmeras do Forsight</button>
+            <button onClick={handleSync} style={{ padding:'9px 18px', borderRadius:'var(--radius-sm)', border:'1px solid rgba(0,208,132,0.3)', background:'rgba(0,208,132,0.1)', color:'var(--green)', fontSize:13, cursor:'pointer' }}>↺ Sincronizar câmeras do Fortify</button>
           </div>
         )}
         {Object.entries(byFloor).map(([floor,fps])=>(

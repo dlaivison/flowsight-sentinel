@@ -20,11 +20,11 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { forsight_poi_id, name, badge_number, photo_url, group_name } = req.body;
+    const { fortify_poi_id, name, badge_number, photo_url, group_name } = req.body;
     const { rows } = await query(`
-      INSERT INTO guards (forsight_poi_id, name, badge_number, photo_url, group_name)
+      INSERT INTO guards (fortify_poi_id, name, badge_number, photo_url, group_name)
       VALUES ($1, $2, $3, $4, $5) RETURNING *
-    `, [forsight_poi_id, name, badge_number, photo_url, group_name]);
+    `, [fortify_poi_id, name, badge_number, photo_url, group_name]);
     res.status(201).json(rows[0]);
   } catch (err) { next(err); }
 });

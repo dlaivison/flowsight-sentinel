@@ -5,7 +5,7 @@
 
 const cron         = require('node-cron')
 const { query }    = require('../db')
-const forsight     = require('./forsight.service')
+const fortify     = require('./fortify.service')
 const alarmService = require('./alarm.service')
 
 class AbsenceEngine {
@@ -23,7 +23,7 @@ class AbsenceEngine {
 
     console.log(`[AbsenceEngine] Iniciando — intervalo: ${this.intervalSec}s`)
     await this._initCoverageState()
-    await forsight.startEventStream((evt) => this._processEvent(evt))
+    await fortify.startEventStream((evt) => this._processEvent(evt))
 
     const interval = Math.max(this.intervalSec, 10)
     this.cronJob = cron.schedule(
@@ -37,7 +37,7 @@ class AbsenceEngine {
 
   stop() {
     if (this.cronJob) this.cronJob.stop()
-    forsight.stopEventStream()
+    fortify.stopEventStream()
     this.isRunning = false
   }
 
@@ -53,7 +53,7 @@ class AbsenceEngine {
 
     if (hasSchedule) {
       const { rows } = await query(`
-        SELECT g.id AS guard_id, g.name AS guard_name, g.forsight_poi_id,
+        SELECT g.id AS guard_id, g.name AS guard_name, g.fortify_poi_id,
                g.photo_url, ss.post_id, ss.status AS schedule_status
         FROM shift_schedules ss
         JOIN guards g       ON g.id = ss.guard_id
@@ -70,7 +70,7 @@ class AbsenceEngine {
       return { mode: 'schedule', guards: rows }
     } else {
       const { rows } = await query(`
-        SELECT g.id AS guard_id, g.name AS guard_name, g.forsight_poi_id, g.photo_url, gpa.post_id
+        SELECT g.id AS guard_id, g.name AS guard_name, g.fortify_poi_id, g.photo_url, gpa.post_id
         FROM guards g
         JOIN guard_post_assignments gpa ON gpa.guard_id = g.id
           AND gpa.post_id = $1 AND gpa.removed_at IS NULL
@@ -84,12 +84,12 @@ class AbsenceEngine {
     try {
       await query(`
         INSERT INTO detection_events
-          (forsight_event_id, guard_id, camera_id, detected_at, confidence, frame_image_url, raw_payload)
+          (fortify_event_id, guard_id, camera_id, detected_at, confidence, frame_image_url, raw_payload)
         SELECT $1, g.id, c.id, $4, $5, $6, $7
-        FROM guards g JOIN cameras c ON c.forsight_id = $3
-        WHERE g.forsight_poi_id = $2 AND g.is_active = TRUE
-        ON CONFLICT (forsight_event_id) DO NOTHING
-      `, [evt.forsightEventId, evt.poiId, evt.cameraId, evt.detectedAt, evt.confidence, evt.frameImageUrl, JSON.stringify(evt.rawPayload)])
+        FROM guards g JOIN cameras c ON c.fortify_id = $3
+        WHERE g.fortify_poi_id = $2 AND g.is_active = TRUE
+        ON CONFLICT (fortify_event_id) DO NOTHING
+      `, [evt.fortifyEventId, evt.poiId, evt.cameraId, evt.detectedAt, evt.confidence, evt.frameImageUrl, JSON.stringify(evt.rawPayload)])
 
       const { rows } = await query(`
         SELECT DISTINCT g.id AS guard_id, g.name AS guard_name,
@@ -99,8 +99,8 @@ class AbsenceEngine {
         JOIN guard_post_assignments gpa ON gpa.guard_id = g.id AND gpa.removed_at IS NULL
         JOIN posts p ON p.id = gpa.post_id AND p.is_active = TRUE
         JOIN post_cameras pc ON pc.post_id = p.id
-        JOIN cameras c ON c.id = pc.camera_id AND c.forsight_id = $2
-        WHERE g.forsight_poi_id = $1 AND g.is_active = TRUE
+        JOIN cameras c ON c.id = pc.camera_id AND c.fortify_id = $2
+        WHERE g.fortify_poi_id = $1 AND g.is_active = TRUE
       `, [evt.poiId, evt.cameraId])
 
       if (rows.length === 0) return

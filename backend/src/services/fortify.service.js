@@ -4,11 +4,11 @@ const { query } = require('../db');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-class ForsightService {
+class FortifyService {
   constructor() {
-    this.baseUrl  = process.env.FORSIGHT_API_URL || 'https://127.0.0.1';
-    this.username = process.env.FORSIGHT_USERNAME || '';
-    this.password = process.env.FORSIGHT_PASSWORD || '';
+    this.baseUrl  = process.env.FORTIFY_API_URL || 'https://127.0.0.1';
+    this.username = process.env.FORTIFY_USERNAME || '';
+    this.password = process.env.FORTIFY_PASSWORD || '';
     this.token       = null;
     this.tokenExpiry = null;
     this.sseRequest  = null;
@@ -28,7 +28,7 @@ class ForsightService {
     );
     this.token       = data.data.token;
     this.tokenExpiry = Date.now() + 7 * 60 * 60 * 1000; // 7h (token dura 8h)
-    console.log('[Forsight] Login OK — token obtido');
+    console.log('[Fortify] Login OK — token obtido');
     return this.token;
   }
 
@@ -37,15 +37,15 @@ class ForsightService {
       const { query } = require('../db')
       const { rows } = await query(`
         SELECT key, value FROM system_config
-        WHERE key IN ('forsight_api_url','forsight_username','forsight_password')
+        WHERE key IN ('fortify_api_url','fortify_username','fortify_password')
       `)
       rows.forEach(r => {
-        if (r.key === 'forsight_api_url'  && r.value) this.baseUrl  = r.value
-        if (r.key === 'forsight_username' && r.value) this.username = r.value
-        if (r.key === 'forsight_password' && r.value) this.password = r.value
+        if (r.key === 'fortify_api_url'  && r.value) this.baseUrl  = r.value
+        if (r.key === 'fortify_username' && r.value) this.username = r.value
+        if (r.key === 'fortify_password' && r.value) this.password = r.value
       })
     } catch(e) {
-      console.error('[Forsight] Erro ao carregar config do banco:', e.message)
+      console.error('[Fortify] Erro ao carregar config do banco:', e.message)
     }
   }
 
@@ -64,16 +64,16 @@ class ForsightService {
         );
         this.token = data.data?.token;
         this.tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
-        console.log('[Forsight] Login OK — token obtido');
+        console.log('[Fortify] Login OK — token obtido');
         return this.token;
       } catch (err) {
-        console.log(`[Forsight] Login falhou (tentativa ${attempt}/5): ${err.message}`);
+        console.log(`[Fortify] Login falhou (tentativa ${attempt}/5): ${err.message}`);
         if (attempt < 5) await new Promise(r => setTimeout(r, 3000));
       }
     }
-    console.log('[Forsight] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
+    console.log('[Fortify] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
     setTimeout(() => { this.token = null; this.tokenExpiry = null; }, 30000);
-    throw new Error('Forsight login failed');
+    throw new Error('Fortify login failed');
   }
 
   async fetchCameras() {
@@ -83,13 +83,13 @@ class ForsightService {
         headers: { Authorization: `Bearer ${token}` },
       });
       return (data.data?.cameras || []).map(cam => ({
-        forsightId: cam.camera_id,
+        fortifyId: cam.camera_id,
         name:       cam.description || cam.camera_id,
         location:   cam.camera_notes?.free_notes || null,
         isOnline:   cam.status?.status_code === 1 || false,
       }));
     } catch (err) {
-      console.error('[Forsight] Erro ao buscar câmeras:', err.message);
+      console.error('[Fortify] Erro ao buscar câmeras:', err.message);
       return [];
     }
   }
@@ -99,15 +99,15 @@ class ForsightService {
     let synced = 0;
     for (const cam of cameras) {
       await query(`
-        INSERT INTO cameras (forsight_id, name, location, is_online, last_seen_at)
+        INSERT INTO cameras (fortify_id, name, location, is_online, last_seen_at)
         VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (forsight_id) DO UPDATE SET
+        ON CONFLICT (fortify_id) DO UPDATE SET
           name=EXCLUDED.name, location=EXCLUDED.location,
           is_online=EXCLUDED.is_online, last_seen_at=NOW(), updated_at=NOW()
-      `, [cam.forsightId, cam.name, cam.location, cam.isOnline]);
+      `, [cam.fortifyId, cam.name, cam.location, cam.isOnline]);
       synced++;
     }
-    console.log(`[Forsight] ${synced} câmeras sincronizadas`);
+    console.log(`[Fortify] ${synced} câmeras sincronizadas`);
     return synced;
   }
 
@@ -119,13 +119,13 @@ class ForsightService {
         params:  { limit: 500 },
       });
       return (data.data?.pois || []).map(poi => ({
-        forsightPoiId: poi.poi_id,
+        fortifyPoiId: poi.poi_id,
         name:          poi.display_name,
         photoUrl:      null,
         groupName:     null,
       }));
     } catch (err) {
-      console.error('[Forsight] Erro ao buscar POIs:', err.message);
+      console.error('[Fortify] Erro ao buscar POIs:', err.message);
       return [];
     }
   }
@@ -144,13 +144,13 @@ class ForsightService {
           token = await this.getToken();
           break;
         } catch (err) {
-          console.error(`[Forsight] Login falhou (tentativa ${attempt}/5):`, err.message);
+          console.error(`[Fortify] Login falhou (tentativa ${attempt}/5):`, err.message);
           if (attempt < 5) await this._sleep(5000 * attempt);
         }
       }
 
       if (!token) {
-        console.error('[Forsight] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
+        console.error('[Fortify] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
         setTimeout(() => this._connectSSE(), 30000);
         return;
       }
@@ -158,14 +158,14 @@ class ForsightService {
       // Resolve URL do SSE via redirect 307
       const sseUrl = await this._resolveSSEUrl(token);
       if (!sseUrl) {
-        console.error('[Forsight] SSE redirect não retornou URL. Tentando em 10s...');
+        console.error('[Fortify] SSE redirect não retornou URL. Tentando em 10s...');
         // Invalida token para forçar novo login na próxima tentativa
         this.token = null;
         setTimeout(() => this._connectSSE(), 10000);
         return;
       }
 
-      console.log(`[Forsight] Conectando SSE em: ${sseUrl}`);
+      console.log(`[Fortify] Conectando SSE em: ${sseUrl}`);
       const parsed = new URL(sseUrl);
 
       const opts = {
@@ -184,14 +184,14 @@ class ForsightService {
 
       this.sseRequest = https.request(opts, (res) => {
         if (res.statusCode !== 200) {
-          console.error(`[Forsight] SSE retornou status ${res.statusCode} — reconectando em 10s`);
+          console.error(`[Fortify] SSE retornou status ${res.statusCode} — reconectando em 10s`);
           res.resume();
           this.token = null; // força novo login
           setTimeout(() => this._connectSSE(), 10000);
           return;
         }
 
-        console.log(`[Forsight] SSE ativo — status ${res.statusCode}`);
+        console.log(`[Fortify] SSE ativo — status ${res.statusCode}`);
         let buffer = '';
 
         res.on('data', (chunk) => {
@@ -210,24 +210,24 @@ class ForsightService {
         });
 
         res.on('end', () => {
-          console.log('[Forsight] SSE encerrado — reconectando em 5s...');
+          console.log('[Fortify] SSE encerrado — reconectando em 5s...');
           setTimeout(() => this._connectSSE(), 5000);
         });
 
         res.on('error', (err) => {
-          console.error('[Forsight] Erro no stream SSE:', err.message);
+          console.error('[Fortify] Erro no stream SSE:', err.message);
           setTimeout(() => this._connectSSE(), 5000);
         });
       });
 
       this.sseRequest.on('error', (err) => {
-        console.error('[Forsight] Erro na conexão SSE:', err.message);
+        console.error('[Fortify] Erro na conexão SSE:', err.message);
         setTimeout(() => this._connectSSE(), 5000);
       });
 
       // Timeout de conexão
       this.sseRequest.setTimeout(30000, () => {
-        console.error('[Forsight] Timeout na conexão SSE');
+        console.error('[Fortify] Timeout na conexão SSE');
         this.sseRequest.destroy();
         setTimeout(() => this._connectSSE(), 5000);
       });
@@ -235,7 +235,7 @@ class ForsightService {
       this.sseRequest.end();
 
     } catch (err) {
-      console.error('[Forsight] Falha ao conectar SSE:', err.message);
+      console.error('[Fortify] Falha ao conectar SSE:', err.message);
       setTimeout(() => this._connectSSE(), 10000);
     }
   }
@@ -259,13 +259,13 @@ class ForsightService {
         if (res.statusCode === 307 && res.headers.location) {
           let sseLocation = res.headers.location;
           // No Docker, substitui 127.0.0.1 pelo host para SSE dinâmico
-          if (process.env.FORSIGHT_API_URL && process.env.FORSIGHT_API_URL.includes('host.docker.internal')) {
+          if (process.env.FORTIFY_API_URL && process.env.FORTIFY_API_URL.includes('host.docker.internal')) {
             sseLocation = sseLocation.replace('127.0.0.1', 'host.docker.internal');
           }
-          console.log(`[Forsight] SSE redirect → ${sseLocation}`);
+          console.log(`[Fortify] SSE redirect → ${sseLocation}`);
           resolve(sseLocation);
         } else {
-          console.error(`[Forsight] Redirect esperado 307, recebeu ${res.statusCode}`);
+          console.error(`[Fortify] Redirect esperado 307, recebeu ${res.statusCode}`);
           resolve(null);
         }
         res.resume();
@@ -283,7 +283,7 @@ class ForsightService {
       for (const app of appearances) {
         if (!app.poi_id && !app.best_poi_id) continue;
         const evt = {
-          forsightEventId: app.appearance_id,
+          fortifyEventId: app.appearance_id,
           poiId:           app.poi_id || app.best_poi_id,
           cameraId:        app.camera_id,
           detectedAt:      new Date((app.last_detection_time_utc || app.start_time_utc) * 1000),
@@ -291,11 +291,11 @@ class ForsightService {
           frameImageUrl:   app.frame_url || app.crop_data?.face_crop_img || null,
           rawPayload:      app,
         };
-        console.log(`[Forsight] Evento recebido: POI=${evt.poiId?.slice(0,8)} CAM=${evt.cameraId?.slice(0,8)}`);
+        console.log(`[Fortify] Evento recebido: POI=${evt.poiId?.slice(0,8)} CAM=${evt.cameraId?.slice(0,8)}`);
         if (this.onEvent) this.onEvent(evt);
       }
     } catch (err) {
-      console.error('[Forsight] Erro ao processar evento SSE:', err.message);
+      console.error('[Fortify] Erro ao processar evento SSE:', err.message);
     }
   }
 
@@ -306,4 +306,4 @@ class ForsightService {
   }
 }
 
-module.exports = new ForsightService();
+module.exports = new FortifyService();

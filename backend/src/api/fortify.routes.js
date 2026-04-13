@@ -1,15 +1,15 @@
 const router   = require('express').Router()
 const { authenticate } = require('./auth.middleware')
 const { query } = require('../db')
-const forsight = require('../services/forsight.service')
+const fortify = require('../services/fortify.service')
 
 router.use(authenticate)
 
 // Lista todas as watchlists do Corsight
 router.get('/watchlists', async (req, res, next) => {
   try {
-    const token = await forsight.getToken()
-    const { data } = await forsight.client.get('/poi_service/poi_db/watchlist/', {
+    const token = await fortify.getToken()
+    const { data } = await fortify.client.get('/poi_service/poi_db/watchlist/', {
       headers: { Authorization: `Bearer ${token}` },
     })
     const watchlists = (data.data?.watchlists || []).map(w => ({
@@ -35,10 +35,10 @@ router.get('/watchlist-pois', async (req, res, next) => {
       return res.json({ configured: false, pois: [], message: 'Nenhuma watchlist configurada. Configure em Parâmetros.' })
     }
 
-    const token = await forsight.getToken()
+    const token = await fortify.getToken()
 
     // 1. Busca todos os POI IDs
-    const listResp = await forsight.client.get('/poi_service/poi_db/poi/', {
+    const listResp = await fortify.client.get('/poi_service/poi_db/poi/', {
       headers: { Authorization: `Bearer ${token}` },
       params:  { limit: 500 },
     })
@@ -53,7 +53,7 @@ router.get('/watchlist-pois', async (req, res, next) => {
     for (let i = 0; i < allIds.length; i += BATCH) {
       const batch = allIds.slice(i, i + BATCH)
       try {
-        const detailResp = await forsight.client.post(
+        const detailResp = await fortify.client.post(
           '/poi_service/poi_db/poi/get/',
           { get_crops: false, get_faces: false, pois: batch },
           { headers: { Authorization: `Bearer ${token}` } }
@@ -65,7 +65,7 @@ router.get('/watchlist-pois', async (req, res, next) => {
         )
         filtered.push(...inWatchlist)
       } catch (err) {
-        console.error('[Forsight] Erro ao buscar POIs:', err.message)
+        console.error('[Fortify] Erro ao buscar POIs:', err.message)
       }
     }
 
@@ -80,7 +80,7 @@ router.get('/watchlist-pois', async (req, res, next) => {
     for (let i = 0; i < filteredIds.length; i += BATCH) {
       const batch = filteredIds.slice(i, i + BATCH)
       try {
-        const photoResp = await forsight.client.post(
+        const photoResp = await fortify.client.post(
           '/poi_service/poi_db/poi/get/',
           { get_crops: true, get_faces: false, pois: batch },
           { headers: { Authorization: `Bearer ${token}` } }
@@ -88,7 +88,7 @@ router.get('/watchlist-pois', async (req, res, next) => {
         const batchPois = photoResp.data.data?.pois || []
         withPhotos.push(...batchPois.filter(Boolean))
       } catch (err) {
-        console.error('[Forsight] Erro ao buscar fotos:', err.message)
+        console.error('[Fortify] Erro ao buscar fotos:', err.message)
         // Adiciona sem foto
         batch.forEach(id => {
           const p = filtered.find(f => f.poi_id === id)
@@ -99,9 +99,9 @@ router.get('/watchlist-pois', async (req, res, next) => {
 
     // 4. Marca quais já estão cadastrados no Sentinel
     const { rows: registered } = await query(
-      `SELECT forsight_poi_id FROM guards WHERE is_active = TRUE`
+      `SELECT fortify_poi_id FROM guards WHERE is_active = TRUE`
     )
-    const registeredSet = new Set(registered.map(r => r.forsight_poi_id))
+    const registeredSet = new Set(registered.map(r => r.fortify_poi_id))
 
     const pois = withPhotos.map(p => ({
       poi_id:       p.poi_id,
@@ -117,9 +117,9 @@ router.get('/watchlist-pois', async (req, res, next) => {
 // Galeria completa (todos os POIs — mantida para compatibilidade)
 router.get('/pois-gallery', async (req, res, next) => {
   try {
-    const token = await forsight.getToken()
+    const token = await fortify.getToken()
 
-    const listResp = await forsight.client.get('/poi_service/poi_db/poi/', {
+    const listResp = await fortify.client.get('/poi_service/poi_db/poi/', {
       headers: { Authorization: `Bearer ${token}` },
       params:  { limit: 500 },
     })
@@ -132,7 +132,7 @@ router.get('/pois-gallery', async (req, res, next) => {
       const batch    = allPois.slice(i, i + BATCH)
       const batchIds = batch.map(p => p.poi_id)
       try {
-        const getResp = await forsight.client.post(
+        const getResp = await fortify.client.post(
           '/poi_service/poi_db/poi/get/',
           { get_crops: true, get_faces: false, pois: batchIds },
           { headers: { Authorization: `Bearer ${token}` } }
@@ -144,9 +144,9 @@ router.get('/pois-gallery', async (req, res, next) => {
     }
 
     const { rows: registered } = await query(
-      `SELECT forsight_poi_id FROM guards WHERE is_active = TRUE`
+      `SELECT fortify_poi_id FROM guards WHERE is_active = TRUE`
     )
-    const registeredSet = new Set(registered.map(r => r.forsight_poi_id))
+    const registeredSet = new Set(registered.map(r => r.fortify_poi_id))
 
     res.json(results.map(poi => ({
       poi_id:       poi.poi_id,

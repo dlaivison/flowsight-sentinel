@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { authenticate } = require('./auth.middleware');
-const forsight = require('../services/forsight.service');
+const fortify = require('../services/fortify.service');
 
 router.use(authenticate);
 
@@ -14,7 +14,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/sync', async (req, res, next) => {
   try {
-    const count = await forsight.syncCameras();
+    const count = await fortify.syncCameras();
     res.json({ synced: count });
   } catch (err) { next(err); }
 });
