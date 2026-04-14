@@ -213,25 +213,49 @@ class FortifyService {
   _processMatches(matches) {
     for (const match of matches) {
       try {
-        // Ignora aparições sem POI identificado
-        const poiId = match.poi_id || match.best_poi_id
-        if (!poiId) continue
+        // Estrutura do history service: dados aninhados em sub-objetos
+        const appearanceData = match.appearance_data || {}
+        const cameraData     = match.camera_data     || {}
+        const matchData      = match.match_data      || {}
+        const cropData       = match.crop_data       || {}
+
+        // POI pode estar em match_data ou diretamente
+        const poiId = matchData.poi_id
+          || matchData.best_poi_id
+          || match.poi_id
+          || match.best_poi_id
+
+        if (!poiId) continue // ignora sem POI identificado
+
+        const cameraId     = cameraData.camera_id     || match.camera_id
+        const appearanceId = appearanceData.appearance_id || match.appearance_id || match.event_id
+
+        // Timestamp: utc_time_started em segundos Unix
+        const ts = appearanceData.utc_time_started
+          || appearanceData.utc_time_ended
+          || match.utc_time_recorded
+        const detectedAt = ts ? new Date(ts * 1000) : new Date()
+
+        const confidence = matchData.score
+          || matchData.best_poi_confidence
+          || match.score
+          || 0
+
+        const frameImageUrl = cropData.face_crop_img
+          ? `data:image/jpeg;base64,${cropData.face_crop_img}`
+          : null
 
         const evt = {
-          fortifyEventId: match.appearance_id,
+          fortifyEventId: appearanceId,
           poiId:          poiId,
-          cameraId:       match.camera_id,
-          detectedAt:     match.last_detection_time_utc
-            ? new Date(match.last_detection_time_utc * 1000)
-            : match.end_time
-              ? new Date(match.end_time)
-              : new Date(),
-          confidence:     match.score || match.best_poi_confidence || 0,
-          frameImageUrl:  match.frame_url || match.crop_data?.face_crop_img || null,
+          cameraId:       cameraId,
+          detectedAt,
+          confidence,
+          frameImageUrl,
           rawPayload:     match,
         }
 
-        console.log(`[Fortify] Evento: POI=${evt.poiId?.slice(0,8)} CAM=${evt.cameraId?.slice(0,8)}`)
+        console.log(`[Fortify] Evento: POI=${evt.poiId?.slice(0,8)} CAM=${evt.cameraId?.slice(0,8)} ts=${detectedAt.toISOString()}`)
 
         if (this.onEvent) this.onEvent(evt)
 

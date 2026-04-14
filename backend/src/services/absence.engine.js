@@ -287,25 +287,44 @@ class AbsenceEngine {
   }
 
   async getSnapshot() {
+    const today = new Date().toISOString().split('T')[0]
+    const now   = new Date()
+    const hm    = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
+
     const { rows } = await query(`
       SELECT
         p.id AS post_id, p.name AS post_name, p.floor,
         p.absence_threshold_seconds, p.warning_threshold_seconds,
         pcs.status, pcs.absence_seconds, pcs.last_detected_at,
         pcs.last_guard_name, pcs.updated_at,
-        JSON_AGG(JSON_BUILD_OBJECT(
-          'guard_id', g.id, 'guard_name', g.name,
-          'badge_number', g.badge_number, 'photo_url', g.photo_url,
-          'last_detected_at', ab.last_detected_at,
-          'status', ab.status, 'absence_minutes', ab.absence_minutes
-        ) ORDER BY gpa.assigned_at) AS guards,
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'guard_id', g.id, 'guard_name', g.name,
+              'badge_number', g.badge_number, 'photo_url', g.photo_url,
+              'last_detected_at', ab.last_detected_at,
+              'status', ab.status, 'absence_minutes', ab.absence_minutes
+            )
+          ) FILTER (WHERE g.id IS NOT NULL),
+          '[]'
+        ) AS guards,
         al.id AS alarm_id, al.triggered_at AS alarm_triggered_at
       FROM posts p
-      JOIN guard_post_assignments gpa ON gpa.post_id = p.id AND gpa.removed_at IS NULL
-      JOIN guards g ON g.id = gpa.guard_id AND g.is_active = TRUE
       LEFT JOIN post_coverage_state pcs ON pcs.post_id = p.id
-      LEFT JOIN absence_state ab ON ab.guard_id = g.id
       LEFT JOIN alarms al ON al.post_id = p.id AND al.status IN ('active','snoozed')
+      LEFT JOIN (
+        SELECT DISTINCT ON (ss.post_id, ss.guard_id) ss.post_id, ss.guard_id
+        FROM shift_schedules ss
+        JOIN shift_types st ON st.id = ss.shift_type_id AND st.is_active = TRUE
+        WHERE ss.date = $1 AND ss.status = 'active'
+          AND (
+            (st.start_time < st.end_time AND $2::time BETWEEN st.start_time AND st.end_time)
+            OR
+            (st.start_time > st.end_time AND ($2::time >= st.start_time OR $2::time <= st.end_time))
+          )
+      ) sa ON sa.post_id = p.id
+      LEFT JOIN guards g ON g.id = sa.guard_id AND g.is_active = TRUE
+      LEFT JOIN absence_state ab ON ab.guard_id = g.id
       WHERE p.is_active = TRUE
       GROUP BY p.id, p.name, p.floor, p.absence_threshold_seconds, p.warning_threshold_seconds,
                pcs.status, pcs.absence_seconds, pcs.last_detected_at, pcs.last_guard_name,
@@ -313,7 +332,7 @@ class AbsenceEngine {
       ORDER BY
         CASE pcs.status WHEN 'alarm' THEN 0 WHEN 'warning' THEN 1 WHEN 'justified' THEN 2 ELSE 3 END,
         pcs.absence_seconds DESC NULLS LAST
-    `)
+    `, [today, hm])
     return rows
   }
 }

@@ -5,12 +5,12 @@ class WatchlistSync {
   constructor() {
     this.timer       = null
     this.running     = false
-    this.intervalMin = 5
+    this.intervalSec = 30
   }
 
   async start() {
     await this._loadInterval()
-    console.log(`[WatchlistSync] Iniciando — intervalo: ${this.intervalMin}min`)
+    console.log(`[WatchlistSync] Iniciando — intervalo: ${this.intervalSec}s`)
     await this._sync()
     this._scheduleNext()
   }
@@ -25,13 +25,13 @@ class WatchlistSync {
       await this._loadInterval()
       await this._sync()
       this._scheduleNext()
-    }, this.intervalMin * 60 * 1000)
+    }, this.intervalSec * 1000)
   }
 
   async _loadInterval() {
     try {
       const { rows } = await query("SELECT value FROM system_config WHERE key = 'watchlist_sync_interval'")
-      this.intervalMin = parseInt(rows[0]?.value) || 5
+      this.intervalSec = parseFloat(rows[0]?.value) || 30
     } catch(_) {}
   }
 
