@@ -1,309 +1,247 @@
-const https  = require('https');
-const axios  = require('axios');
-const { query } = require('../db');
-
-const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+const axios  = require('axios')
+const https  = require('https')
+const { query } = require('../db')
 
 class FortifyService {
   constructor() {
-    this.baseUrl  = process.env.FORTIFY_API_URL || 'https://127.0.0.1';
-    this.username = process.env.FORTIFY_USERNAME || '';
-    this.password = process.env.FORTIFY_PASSWORD || '';
-    this.token       = null;
-    this.tokenExpiry = null;
-    this.sseRequest  = null;
-    this.onEvent     = null;
+    this.baseUrl     = 'https://127.0.0.1'
+    this.username    = ''
+    this.password    = ''
+    this.token       = null
+    this.tokenExpiry = null
+    this.onEvent     = null
+    this.pollTimer   = null
+    this.lastPollMs  = Date.now() - 60000 // começa 1 min atrás
+    this.running     = false
+    this.pollInterval = 10000 // 10 segundos padrão
 
-    this.client = axios.create({ baseURL: this.baseUrl, httpsAgent, timeout: 15000 });
-  }
-
-  async login() {
-    const params = new URLSearchParams();
-    params.append('username', this.username);
-    params.append('password', this.password);
-    const { data } = await this.client.post(
-      '/users_service/auth/login/',
-      params.toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    this.token       = data.data.token;
-    this.tokenExpiry = Date.now() + 7 * 60 * 60 * 1000; // 7h (token dura 8h)
-    console.log('[Fortify] Login OK — token obtido');
-    return this.token;
+    this.client = axios.create({
+      baseURL:    this.baseUrl,
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      timeout: 15000,
+    })
   }
 
   async _loadConfigFromDb() {
     try {
-      const { query } = require('../db')
       const { rows } = await query(`
         SELECT key, value FROM system_config
-        WHERE key IN ('fortify_api_url','fortify_username','fortify_password')
+        WHERE key IN ('fortify_api_url','fortify_username','fortify_password','polling_interval_seconds')
       `)
       rows.forEach(r => {
-        if (r.key === 'fortify_api_url'  && r.value) this.baseUrl  = r.value
-        if (r.key === 'fortify_username' && r.value) this.username = r.value
-        if (r.key === 'fortify_password' && r.value) this.password = r.value
+        if (r.key === 'fortify_api_url'           && r.value) {
+          this.baseUrl = r.value
+          this.client.defaults.baseURL = r.value
+        }
+        if (r.key === 'fortify_username'           && r.value) this.username = r.value
+        if (r.key === 'fortify_password'           && r.value) this.password = r.value
+        if (r.key === 'polling_interval_seconds'   && r.value) this.pollInterval = parseInt(r.value) * 1000
       })
     } catch(e) {
-      console.error('[Fortify] Erro ao carregar config do banco:', e.message)
+      console.error('[Fortify] Erro ao carregar config:', e.message)
     }
   }
 
+  async login() {
+    const params = new URLSearchParams()
+    params.append('username', this.username)
+    params.append('password', this.password)
+    params.append('session_time', '999999999999')
+    const { data } = await this.client.post(
+      `${this.baseUrl}/users_service/auth/login/`,
+      params.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    )
+    this.token       = data.data?.token
+    this.tokenExpiry = Date.now() + 23 * 60 * 60 * 1000
+    console.log('[Fortify] Login OK — token obtido')
+    return this.token
+  }
+
   async getToken() {
-    // Recarrega config do banco a cada login
     await this._loadConfigFromDb()
     if (this.token && this.tokenExpiry && Date.now() < this.tokenExpiry) {
-      return this.token;
+      return this.token
     }
     for (let attempt = 1; attempt <= 5; attempt++) {
       try {
-        const { data } = await this.client.post(
-          '/users_service/auth/login/',
-          `username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}&session_time=999999999999`,
-          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-        );
-        this.token = data.data?.token;
-        this.tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
-        console.log('[Fortify] Login OK — token obtido');
-        return this.token;
+        return await this.login()
       } catch (err) {
-        console.log(`[Fortify] Login falhou (tentativa ${attempt}/5): ${err.message}`);
-        if (attempt < 5) await new Promise(r => setTimeout(r, 3000));
+        console.log(`[Fortify] Login falhou (tentativa ${attempt}/5): ${err.message}`)
+        if (attempt < 5) await this._sleep(3000)
       }
     }
-    console.log('[Fortify] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
-    setTimeout(() => { this.token = null; this.tokenExpiry = null; }, 30000);
-    throw new Error('Fortify login failed');
+    console.log('[Fortify] Não foi possível fazer login após 5 tentativas.')
+    throw new Error('Fortify login failed')
   }
 
   async fetchCameras() {
     try {
-      const token = await this.getToken();
-      const { data } = await this.client.get('/cameras_service/cameras/', {
+      const token = await this.getToken()
+      const { data } = await this.client.get(`${this.baseUrl}/cameras_service/cameras/`, {
         headers: { Authorization: `Bearer ${token}` },
-      });
-      return (data.data?.cameras || []).map(cam => ({
-        fortifyId: cam.camera_id,
-        name:       cam.description || cam.camera_id,
-        location:   cam.camera_notes?.free_notes || null,
-        isOnline:   cam.status?.status_code === 1 || false,
-      }));
+        params:  { limit: 500 },
+      })
+      return (data.data?.cameras || []).map(c => ({
+        fortifyId: c.camera_id,
+        name:      c.display_name || c.camera_id,
+        status:    c.status,
+      }))
     } catch (err) {
-      console.error('[Fortify] Erro ao buscar câmeras:', err.message);
-      return [];
+      console.error('[Fortify] Erro ao buscar câmeras:', err.message)
+      return []
     }
   }
 
   async syncCameras() {
-    const cameras = await this.fetchCameras();
-    let synced = 0;
+    const cameras = await this.fetchCameras()
+    let synced = 0
     for (const cam of cameras) {
       await query(`
-        INSERT INTO cameras (fortify_id, name, location, is_online, last_seen_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO cameras (fortify_id, name, status)
+        VALUES ($1, $2, $3)
         ON CONFLICT (fortify_id) DO UPDATE SET
-          name=EXCLUDED.name, location=EXCLUDED.location,
-          is_online=EXCLUDED.is_online, last_seen_at=NOW(), updated_at=NOW()
-      `, [cam.fortifyId, cam.name, cam.location, cam.isOnline]);
-      synced++;
+          name = EXCLUDED.name, status = EXCLUDED.status, updated_at = NOW()
+      `, [cam.fortifyId, cam.name, cam.status]).catch(() => {})
+      synced++
     }
-    console.log(`[Fortify] ${synced} câmeras sincronizadas`);
-    return synced;
+    console.log(`[Fortify] ${synced} câmeras sincronizadas`)
+    return synced
   }
 
   async fetchPOIs() {
     try {
-      const token = await this.getToken();
-      const { data } = await this.client.get('/poi_service/poi_db/poi/', {
+      const token = await this.getToken()
+      const { data } = await this.client.get(`${this.baseUrl}/poi_service/poi_db/poi/`, {
         headers: { Authorization: `Bearer ${token}` },
         params:  { limit: 500 },
-      });
+      })
       return (data.data?.pois || []).map(poi => ({
         fortifyPoiId: poi.poi_id,
-        name:          poi.display_name,
-        photoUrl:      null,
-        groupName:     null,
-      }));
+        name:         poi.display_name,
+        photoUrl:     null,
+        groupName:    null,
+      }))
     } catch (err) {
-      console.error('[Fortify] Erro ao buscar POIs:', err.message);
-      return [];
+      console.error('[Fortify] Erro ao buscar POIs:', err.message)
+      return []
     }
   }
+
+  // ─── POLLING (substitui SSE) ───────────────────────────────────────────────
 
   async startEventStream(onEventCallback) {
-    this.onEvent = onEventCallback;
-    await this._connectSSE();
+    this.onEvent = onEventCallback
+    await this._loadConfigFromDb()
+    console.log(`[Fortify] Iniciando polling — intervalo: ${this.pollInterval/1000}s`)
+    this.running = true
+    this.lastPollMs = Date.now() - this.pollInterval
+    await this._poll()
   }
-
-  async _connectSSE() {
-    try {
-      // Login com retry — tenta até conseguir
-      let token = null;
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        try {
-          token = await this.getToken();
-          break;
-        } catch (err) {
-          console.error(`[Fortify] Login falhou (tentativa ${attempt}/5):`, err.message);
-          if (attempt < 5) await this._sleep(5000 * attempt);
-        }
-      }
-
-      if (!token) {
-        console.error('[Fortify] Não foi possível fazer login após 5 tentativas. Tentando em 30s...');
-        setTimeout(() => this._connectSSE(), 30000);
-        return;
-      }
-
-      // Resolve URL do SSE via redirect 307
-      const sseUrl = await this._resolveSSEUrl(token);
-      if (!sseUrl) {
-        console.error('[Fortify] SSE redirect não retornou URL. Tentando em 10s...');
-        // Invalida token para forçar novo login na próxima tentativa
-        this.token = null;
-        setTimeout(() => this._connectSSE(), 10000);
-        return;
-      }
-
-      console.log(`[Fortify] Conectando SSE em: ${sseUrl}`);
-      const parsed = new URL(sseUrl);
-
-      const opts = {
-        hostname:           parsed.hostname,
-        port:               parseInt(parsed.port) || 443,
-        path:               parsed.pathname + (parsed.search || ''),
-        method:             'GET',
-        rejectUnauthorized: false,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept':        'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection':    'keep-alive',
-        },
-      };
-
-      this.sseRequest = https.request(opts, (res) => {
-        if (res.statusCode !== 200) {
-          console.error(`[Fortify] SSE retornou status ${res.statusCode} — reconectando em 10s`);
-          res.resume();
-          this.token = null; // força novo login
-          setTimeout(() => this._connectSSE(), 10000);
-          return;
-        }
-
-        console.log(`[Fortify] SSE ativo — status ${res.statusCode}`);
-        let buffer = '';
-
-        res.on('data', (chunk) => {
-          buffer += chunk.toString();
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-          let eventData = null;
-          for (const line of lines) {
-            if (line.startsWith('data:')) {
-              try { eventData = JSON.parse(line.slice(5).trim()); } catch (_) {}
-            } else if (line.trim() === '' && eventData) {
-              this._processSSEEvent(eventData);
-              eventData = null;
-            }
-          }
-        });
-
-        res.on('end', () => {
-          console.log('[Fortify] SSE encerrado — reconectando em 5s...');
-          setTimeout(() => this._connectSSE(), 5000);
-        });
-
-        res.on('error', (err) => {
-          console.error('[Fortify] Erro no stream SSE:', err.message);
-          setTimeout(() => this._connectSSE(), 5000);
-        });
-      });
-
-      this.sseRequest.on('error', (err) => {
-        console.error('[Fortify] Erro na conexão SSE:', err.message);
-        setTimeout(() => this._connectSSE(), 5000);
-      });
-
-      // Timeout de conexão
-      this.sseRequest.setTimeout(30000, () => {
-        console.error('[Fortify] Timeout na conexão SSE');
-        this.sseRequest.destroy();
-        setTimeout(() => this._connectSSE(), 5000);
-      });
-
-      this.sseRequest.end();
-
-    } catch (err) {
-      console.error('[Fortify] Falha ao conectar SSE:', err.message);
-      setTimeout(() => this._connectSSE(), 10000);
-    }
-  }
-
-  async _resolveSSEUrl(token) {
-    return new Promise((resolve) => {
-      const url  = new URL('/events_service/events/', this.baseUrl);
-      const opts = {
-        hostname:           url.hostname,
-        port:               parseInt(url.port) || 443,
-        path:               url.pathname,
-        method:             'GET',
-        rejectUnauthorized: false,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept':        'text/event-stream',
-        },
-      };
-
-      const req = https.request(opts, (res) => {
-        if (res.statusCode === 307 && res.headers.location) {
-          let sseLocation = res.headers.location;
-          // No Docker, substitui 127.0.0.1 pelo host para SSE dinâmico
-          if (process.env.FORTIFY_API_URL && process.env.FORTIFY_API_URL.includes('host.docker.internal')) {
-            sseLocation = sseLocation.replace('127.0.0.1', 'host.docker.internal');
-          }
-          console.log(`[Fortify] SSE redirect → ${sseLocation}`);
-          resolve(sseLocation);
-        } else {
-          console.error(`[Fortify] Redirect esperado 307, recebeu ${res.statusCode}`);
-          resolve(null);
-        }
-        res.resume();
-      });
-
-      req.setTimeout(10000, () => { req.destroy(); resolve(null); });
-      req.on('error', () => resolve(null));
-      req.end();
-    });
-  }
-
-  _processSSEEvent(eventData) {
-    try {
-      const appearances = eventData?.data?.appearances || [];
-      for (const app of appearances) {
-        if (!app.poi_id && !app.best_poi_id) continue;
-        const evt = {
-          fortifyEventId: app.appearance_id,
-          poiId:           app.poi_id || app.best_poi_id,
-          cameraId:        app.camera_id,
-          detectedAt:      new Date((app.last_detection_time_utc || app.start_time_utc) * 1000),
-          confidence:      app.score || app.best_poi_confidence || 0,
-          frameImageUrl:   app.frame_url || app.crop_data?.face_crop_img || null,
-          rawPayload:      app,
-        };
-        console.log(`[Fortify] Evento recebido: POI=${evt.poiId?.slice(0,8)} CAM=${evt.cameraId?.slice(0,8)}`);
-        if (this.onEvent) this.onEvent(evt);
-      }
-    } catch (err) {
-      console.error('[Fortify] Erro ao processar evento SSE:', err.message);
-    }
-  }
-
-  _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   stopEventStream() {
-    if (this.sseRequest) { this.sseRequest.destroy(); this.sseRequest = null; }
+    this.running = false
+    if (this.pollTimer) { clearTimeout(this.pollTimer); this.pollTimer = null }
+    console.log('[Fortify] Polling parado')
   }
+
+  _scheduleNextPoll() {
+    if (!this.running) return
+    this.pollTimer = setTimeout(async () => {
+      await this._poll()
+    }, this.pollInterval)
+  }
+
+  async _poll() {
+    if (!this.running) return
+    try {
+      const token = await this.getToken()
+      const now   = Date.now()
+      const from  = this.lastPollMs
+      const till  = now
+
+      // Busca aparições no history_db (aparições que terminaram)
+      const histResp = await this.client.post(
+        `${this.baseUrl}/history_service/history/`,
+        { from, till },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params:  { query_db: 'history_db', limit: 300 },
+        }
+      ).catch(e => { console.error('[Fortify] Erro history_db:', e.message); return null })
+
+      // Busca aparições no live_db (aparições ainda ativas)
+      const liveResp = await this.client.post(
+        `${this.baseUrl}/history_service/history/`,
+        { from },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params:  { query_db: 'live_db', limit: 300 },
+        }
+      ).catch(e => { console.error('[Fortify] Erro live_db:', e.message); return null })
+
+      const histMatches = histResp?.data?.data?.matches || []
+      const liveMatches = liveResp?.data?.data?.matches || []
+
+      // Deduplica por appearance_id
+      const seen = new Set()
+      const allMatches = [...histMatches, ...liveMatches].filter(m => {
+        if (!m || !m.appearance_id) return false
+        if (seen.has(m.appearance_id)) return false
+        seen.add(m.appearance_id)
+        return true
+      })
+
+      if (allMatches.length > 0) {
+        console.log(`[Fortify] Polling: ${allMatches.length} aparições encontradas`)
+        this._processMatches(allMatches)
+      }
+
+      this.lastPollMs = till
+
+    } catch (err) {
+      console.error('[Fortify] Erro no polling:', err.message)
+      // Se token expirou, invalida
+      if (err.response?.status === 401) {
+        this.token = null
+      }
+    } finally {
+      this._scheduleNextPoll()
+    }
+  }
+
+  _processMatches(matches) {
+    for (const match of matches) {
+      try {
+        // Ignora aparições sem POI identificado
+        const poiId = match.poi_id || match.best_poi_id
+        if (!poiId) continue
+
+        const evt = {
+          fortifyEventId: match.appearance_id,
+          poiId:          poiId,
+          cameraId:       match.camera_id,
+          detectedAt:     match.last_detection_time_utc
+            ? new Date(match.last_detection_time_utc * 1000)
+            : match.end_time
+              ? new Date(match.end_time)
+              : new Date(),
+          confidence:     match.score || match.best_poi_confidence || 0,
+          frameImageUrl:  match.frame_url || match.crop_data?.face_crop_img || null,
+          rawPayload:     match,
+        }
+
+        console.log(`[Fortify] Evento: POI=${evt.poiId?.slice(0,8)} CAM=${evt.cameraId?.slice(0,8)}`)
+
+        if (this.onEvent) this.onEvent(evt)
+
+      } catch (err) {
+        console.error('[Fortify] Erro ao processar match:', err.message)
+      }
+    }
+  }
+
+  _sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 }
 
-module.exports = new FortifyService();
+module.exports = new FortifyService()
