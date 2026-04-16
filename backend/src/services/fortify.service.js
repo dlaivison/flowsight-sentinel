@@ -10,8 +10,10 @@ class FortifyService {
     this.token       = null
     this.tokenExpiry = null
     this.onEvent     = null
-    this.pollTimer   = null
-    this.lastPollMs  = Date.now() - 60000 // começa 1 min atrás
+    this.pollTimer      = null
+    this.lastPollMs      = Date.now() - 60000
+    this.processedIds    = new Set() // cache de appearance_ids já processados
+    this.processedMaxSize = 1000     // limite do cache // começa 1 min atrás
     this.running     = false
     this.pollInterval = 3000 // 3 segundos padrão
 
@@ -190,7 +192,6 @@ class FortifyService {
 
       const histMatches = histResp?.data?.data?.matches || []
       const liveMatches = liveResp?.data?.data?.matches || []
-      console.log(`[Fortify] Poll: from=${from} till=${till} hist=${histMatches.length} live=${liveMatches.length}`)
 
       // Deduplica por appearance_id (está em appearance_data.appearance_id ou event_id)
       const seen = new Set()
@@ -199,8 +200,21 @@ class FortifyService {
         const aid = m.appearance_data?.appearance_id || m.appearance_id || m.event_id
         if (!aid) return false
         if (seen.has(aid)) return false
+        if (this.processedIds.has(aid)) return false  // já processado antes
         seen.add(aid)
         return true
+      })
+      // Adiciona ao cache após processar
+      allMatches.forEach(m => {
+        const aid = m.appearance_data?.appearance_id || m.appearance_id || m.event_id
+        if (aid) {
+          this.processedIds.add(aid)
+          // Limpa cache se muito grande
+          if (this.processedIds.size > this.processedMaxSize) {
+            const arr = [...this.processedIds]
+            this.processedIds = new Set(arr.slice(arr.length - 500))
+          }
+        }
       })
 
       if (allMatches.length > 0) {
@@ -208,7 +222,6 @@ class FortifyService {
         // Debug: mostra estrutura do primeiro match
         const fm = allMatches[0]
         const fmd = fm.match_data || {}
-        console.log(`[Fortify] Debug first match - poi_id: ${fmd.poi_id} | keys: ${Object.keys(fmd).join(',')}`)
         this._processMatches(allMatches)
       }
 
@@ -239,7 +252,6 @@ class FortifyService {
           || matchData.best_poi_id
           || match.poi_id
           || match.best_poi_id
-        console.log(`[Fortify] Match com POI: ${matchData.poi_display_name} id=${poiId?.slice(0,8)}`)
 
         if (!poiId) continue // ignora sem POI identificado
 
