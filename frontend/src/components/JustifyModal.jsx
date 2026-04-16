@@ -57,7 +57,6 @@ export default function JustifyModal({ post, onClose, onSave }) {
           </div>
           <button onClick={onClose} style={{ border:'none', background:'var(--bg-hover)', color:'var(--text-secondary)', width:28, height:28, borderRadius:6, cursor:'pointer' }}>✕</button>
         </div>
-
         <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:14 }}>
           {/* Motivo */}
           <div>
@@ -74,7 +73,6 @@ export default function JustifyModal({ post, onClose, onSave }) {
               ))}
             </div>
           </div>
-
           {/* Campo livre se motivo = Outro */}
           {selectedReason?.name === 'Outro' && (
             <div>
@@ -83,7 +81,6 @@ export default function JustifyModal({ post, onClose, onSave }) {
                 value={custom} onChange={e=>setCustom(e.target.value)} placeholder="Descreva o motivo..."/>
             </div>
           )}
-
           {/* Duração */}
           <div>
             <label style={{ display:'block', fontSize:10, color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:6 }}>
@@ -96,16 +93,13 @@ export default function JustifyModal({ post, onClose, onSave }) {
               <span>5min</span><span>2h</span>
             </div>
           </div>
-
           {/* Info */}
           <div style={{ background:'rgba(88,166,255,0.08)', border:'1px solid rgba(88,166,255,0.2)', borderRadius:'var(--radius-sm)', padding:'10px 12px', fontSize:11, color:'#58A6FF', display:'flex', alignItems:'center', gap:8 }}>
             <span>ℹ</span>
             <span>O posto ficará em status <strong>Justificado</strong> por {duration} minutos. Após esse período, o sistema retomará o monitoramento normal.</span>
           </div>
-
           {error && <div style={{ background:'rgba(255,68,68,0.1)', border:'1px solid rgba(255,68,68,0.3)', borderRadius:'var(--radius-sm)', padding:'8px 12px', fontSize:12, color:'#FF4444' }}>{error}</div>}
         </div>
-
         <div style={{ display:'flex', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:'1px solid var(--border-subtle)' }}>
           <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', fontSize:13, cursor:'pointer' }}>Cancelar</button>
           <button onClick={save} disabled={saving} style={{ padding:'8px 20px', borderRadius:'var(--radius-sm)', border:'none', background:'linear-gradient(135deg,#58A6FF,#2D7DD2)', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
