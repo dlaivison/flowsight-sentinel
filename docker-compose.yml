@@ -33,7 +33,7 @@ services:
       postgres:
         condition: service_healthy
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # Permite acesso ao Forsight no host
+      - "host.docker.internal:host-gateway"  # Permite acesso ao Fortify no host
     environment:
       NODE_ENV:    production
       PORT:        3010
@@ -43,9 +43,9 @@ services:
       DB_USER:     flowsight
       DB_PASSWORD: ${DB_PASSWORD:-flowsight_secure_2026}
       JWT_SECRET:          ${JWT_SECRET:-sentinel_jwt_secret_troque_em_producao}
-      FORSIGHT_API_URL:    ${FORSIGHT_API_URL:-https://host.docker.internal}
-      FORSIGHT_USERNAME:   ${FORSIGHT_USERNAME:-apifortytest}
-      FORSIGHT_PASSWORD:   ${FORSIGHT_PASSWORD:-forty@2025}
+      FORTIFY_API_URL:    ${FORTIFY_API_URL:-https://host.docker.internal}
+      FORTIFY_USERNAME:   ${FORTIFY_USERNAME:-apifortytest}
+      FORTIFY_PASSWORD:   ${FORTIFY_PASSWORD:-forty@2025}
     ports:
       - "127.0.0.1:3011:3010"
     volumes:
