@@ -210,6 +210,18 @@ CREATE TABLE public.whatsapp_license (
     created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ─── VIEW ───────────────────────────────────────────────────────────────────
+CREATE VIEW public.active_assignments AS
+    SELECT g.id AS guard_id, g.name AS guard_name, g.fortify_poi_id,
+           g.photo_url, g.badge_number, g.group_name,
+           p.id AS post_id, p.name AS post_name, p.floor,
+           p.absence_threshold_seconds, p.warning_threshold_seconds,
+           a.assigned_at
+    FROM public.guards g
+    JOIN public.guard_post_assignments a ON a.guard_id = g.id AND a.removed_at IS NULL
+    JOIN public.posts p ON p.id = a.post_id
+    WHERE g.is_active = TRUE AND p.is_active = TRUE;
+
 -- ─── FOREIGN KEYS ───────────────────────────────────────────────────────────
 
 ALTER TABLE public.post_cameras
