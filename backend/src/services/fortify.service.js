@@ -86,8 +86,8 @@ class FortifyService {
       })
       return (data.data?.cameras || []).map(c => ({
         fortifyId: c.camera_id,
-        name:      c.display_name || c.camera_id,
-        status:    c.status,
+        name:      c.display_name || c.description || c.camera_id,
+        status:    c.camera_status?.status_str || c.status || null,
       }))
     } catch (err) {
       console.error('[Fortify] Erro ao buscar câmeras:', err.message)

@@ -42,11 +42,11 @@ router.get('/', async (req, res, next) => {
 // Cria novo posto
 router.post('/', async (req, res, next) => {
   try {
-    const { name, description, floor, absence_threshold_minutes, warning_threshold_minutes, camera_ids } = req.body;
+    const { name, description, floor, absence_threshold_seconds, warning_threshold_seconds, camera_ids } = req.body;
     const { rows } = await query(`
-      INSERT INTO posts (name, description, floor, absence_threshold_minutes, warning_threshold_minutes)
+      INSERT INTO posts (name, description, floor, absence_threshold_seconds, warning_threshold_seconds)
       VALUES ($1, $2, $3, $4, $5) RETURNING *
-    `, [name, description, floor, absence_threshold_minutes || 30, warning_threshold_minutes || 20]);
+    `, [name, description, floor, absence_threshold_seconds || 60, warning_threshold_seconds || 40]);
     const post = rows[0];
     if (camera_ids?.length) {
       for (const cameraId of camera_ids) {
@@ -63,18 +63,18 @@ router.post('/', async (req, res, next) => {
 // Atualiza posto
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, description, floor, absence_threshold_minutes, warning_threshold_minutes, camera_ids, is_active } = req.body;
+    const { name, description, floor, absence_threshold_seconds, warning_threshold_seconds, camera_ids, is_active } = req.body;
     const { rows } = await query(`
       UPDATE posts SET
         name = COALESCE($1, name),
         description = COALESCE($2, description),
         floor = COALESCE($3, floor),
-        absence_threshold_minutes = COALESCE($4, absence_threshold_minutes),
-        warning_threshold_minutes = COALESCE($5, warning_threshold_minutes),
+        absence_threshold_seconds = COALESCE($4, absence_threshold_seconds),
+        warning_threshold_seconds = COALESCE($5, warning_threshold_seconds),
         is_active = COALESCE($6, is_active),
         updated_at = NOW()
       WHERE id = $7 RETURNING *
-    `, [name, description, floor, absence_threshold_minutes, warning_threshold_minutes, is_active, req.params.id]);
+    `, [name, description, floor, absence_threshold_seconds, warning_threshold_seconds, is_active, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Posto não encontrado' });
     if (camera_ids) {
       await query('DELETE FROM post_cameras WHERE post_id = $1', [req.params.id]);
