@@ -13,7 +13,7 @@ class FortifyService {
     this.pollTimer   = null
     this.lastPollMs  = Date.now() - 60000 // começa 1 min atrás
     this.running     = false
-    this.pollInterval = 10000 // 10 segundos padrão
+    this.pollInterval = 3000 // 3 segundos padrão
 
     this.client = axios.create({
       baseURL:    this.baseUrl,
@@ -35,7 +35,7 @@ class FortifyService {
         }
         if (r.key === 'fortify_username'           && r.value) this.username = r.value
         if (r.key === 'fortify_password'           && r.value) this.password = r.value
-        if (r.key === 'polling_interval_seconds'   && r.value) this.pollInterval = parseInt(r.value) * 1000
+        if (r.key === 'fortify_polling_interval'   && r.value) this.pollInterval = parseInt(r.value) * 1000
       })
     } catch(e) {
       console.error('[Fortify] Erro ao carregar config:', e.message)
@@ -156,14 +156,22 @@ class FortifyService {
     if (!this.running) return
     try {
       const token = await this.getToken()
-      const now   = Date.now()
-      const from  = this.lastPollMs
+      const now   = Date.now()          // milissegundos
+      const from  = now - 30000          // últimos 30 segundos em ms
       const till  = now
 
-      // Busca aparições no history_db (aparições que terminaram)
+      // Busca aparições no history_db filtrado por watchlist matched
+      const { query: dbQuery } = require('../db')
+      const { rows: wlCfg } = await dbQuery("SELECT value FROM system_config WHERE key = 'guards_watchlist_id'")
+      const watchlistId = wlCfg[0]?.value
+
+      const pollBody = watchlistId
+        ? { from, till, watchlists: [{ watchlist_id: watchlistId, match_outcome: 'matched' }] }
+        : { from, till }
+
       const histResp = await this.client.post(
         `${this.baseUrl}/history_service/history/`,
-        { from, till },
+        pollBody,
         {
           headers: { Authorization: `Bearer ${token}` },
           params:  { query_db: 'history_db', limit: 300 },
@@ -182,22 +190,29 @@ class FortifyService {
 
       const histMatches = histResp?.data?.data?.matches || []
       const liveMatches = liveResp?.data?.data?.matches || []
+      console.log(`[Fortify] Poll: from=${from} till=${till} hist=${histMatches.length} live=${liveMatches.length}`)
 
-      // Deduplica por appearance_id
+      // Deduplica por appearance_id (está em appearance_data.appearance_id ou event_id)
       const seen = new Set()
       const allMatches = [...histMatches, ...liveMatches].filter(m => {
-        if (!m || !m.appearance_id) return false
-        if (seen.has(m.appearance_id)) return false
-        seen.add(m.appearance_id)
+        if (!m) return false
+        const aid = m.appearance_data?.appearance_id || m.appearance_id || m.event_id
+        if (!aid) return false
+        if (seen.has(aid)) return false
+        seen.add(aid)
         return true
       })
 
       if (allMatches.length > 0) {
         console.log(`[Fortify] Polling: ${allMatches.length} aparições encontradas`)
+        // Debug: mostra estrutura do primeiro match
+        const fm = allMatches[0]
+        const fmd = fm.match_data || {}
+        console.log(`[Fortify] Debug first match - poi_id: ${fmd.poi_id} | keys: ${Object.keys(fmd).join(',')}`)
         this._processMatches(allMatches)
       }
 
-      this.lastPollMs = till
+      this.lastPollMs = Date.now()
 
     } catch (err) {
       console.error('[Fortify] Erro no polling:', err.message)
@@ -224,6 +239,7 @@ class FortifyService {
           || matchData.best_poi_id
           || match.poi_id
           || match.best_poi_id
+        console.log(`[Fortify] Match com POI: ${matchData.poi_display_name} id=${poiId?.slice(0,8)}`)
 
         if (!poiId) continue // ignora sem POI identificado
 

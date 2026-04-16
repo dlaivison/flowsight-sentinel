@@ -1,17 +1,15 @@
 /**
  * absence.engine.js — Motor de ausências FlowSight Sentinel
- * Fase 2+3: monitora postos, respeita escala de turno e ausências justificadas
  */
-
 const cron         = require('node-cron')
 const { query }    = require('../db')
-const fortify     = require('./fortify.service')
+const fortify      = require('./fortify.service')
 const alarmService = require('./alarm.service')
 
 class AbsenceEngine {
   constructor() {
     this.isRunning   = false
-    this.intervalSec = 30
+    this.intervalSec = 10
     this.cronJob     = null
   }
 
@@ -19,18 +17,15 @@ class AbsenceEngine {
     const { rows } = await query(
       "SELECT value FROM system_config WHERE key = 'polling_interval_seconds'"
     )
-    if (rows[0]) this.intervalSec = parseInt(rows[0].value) || 30
-
+    if (rows[0]) this.intervalSec = parseInt(rows[0].value) || 10
     console.log(`[AbsenceEngine] Iniciando — intervalo: ${this.intervalSec}s`)
     await this._initCoverageState()
     await fortify.startEventStream((evt) => this._processEvent(evt))
-
-    const interval = Math.max(this.intervalSec, 10)
+    const interval = Math.max(this.intervalSec, 5)
     this.cronJob = cron.schedule(
       `*/${interval} * * * * *`,
       () => this._recalculateAllPosts()
     )
-
     this.isRunning = true
     console.log('[AbsenceEngine] Motor iniciado ✓')
   }
@@ -43,12 +38,14 @@ class AbsenceEngine {
 
   async _getActiveGuardsForPost(postId) {
     const today = new Date().toISOString().split('T')[0]
+    const now   = new Date()
+    const hm    = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
+
     const { rows: scheduleExists } = await query(`
       SELECT COUNT(*) as count FROM shift_schedules ss
       JOIN shift_types st ON st.id = ss.shift_type_id
       WHERE ss.date = $1 AND st.is_active = TRUE
     `, [today])
-
     const hasSchedule = parseInt(scheduleExists[0].count) > 0
 
     if (hasSchedule) {
@@ -62,11 +59,11 @@ class AbsenceEngine {
           AND (ss.post_id = $2 OR ss.post_id IS NULL)
           AND st.is_active = TRUE
           AND (
-            (st.start_time < st.end_time AND CURRENT_TIME BETWEEN st.start_time AND st.end_time)
+            (st.start_time < st.end_time AND $3::time BETWEEN st.start_time AND st.end_time)
             OR
-            (st.start_time > st.end_time AND (CURRENT_TIME >= st.start_time OR CURRENT_TIME <= st.end_time))
+            (st.start_time > st.end_time AND ($3::time >= st.start_time OR $3::time <= st.end_time))
           )
-      `, [today, postId])
+      `, [today, postId, hm])
       return { mode: 'schedule', guards: rows }
     } else {
       const { rows } = await query(`
@@ -82,6 +79,7 @@ class AbsenceEngine {
 
   async _processEvent(evt) {
     try {
+      // 1. Registra evento de detecção
       await query(`
         INSERT INTO detection_events
           (fortify_event_id, guard_id, camera_id, detected_at, confidence, frame_image_url, raw_payload)
@@ -91,17 +89,28 @@ class AbsenceEngine {
         ON CONFLICT (fortify_event_id) DO NOTHING
       `, [evt.fortifyEventId, evt.poiId, evt.cameraId, evt.detectedAt, evt.confidence, evt.frameImageUrl, JSON.stringify(evt.rawPayload)])
 
+      const today = new Date().toISOString().split('T')[0]
+      const now   = new Date()
+      const hm    = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
+
+      // 2. Encontra vigilante e posto via shift_schedules
       const { rows } = await query(`
         SELECT DISTINCT g.id AS guard_id, g.name AS guard_name,
           p.id AS post_id, p.name AS post_name,
           p.absence_threshold_seconds, p.warning_threshold_seconds, c.id AS camera_id
         FROM guards g
-        JOIN guard_post_assignments gpa ON gpa.guard_id = g.id AND gpa.removed_at IS NULL
-        JOIN posts p ON p.id = gpa.post_id AND p.is_active = TRUE
+        JOIN shift_schedules ss ON ss.guard_id = g.id AND ss.date = $3 AND ss.status = 'active'
+        JOIN shift_types st ON st.id = ss.shift_type_id AND st.is_active = TRUE
+        JOIN posts p ON p.id = ss.post_id AND p.is_active = TRUE
         JOIN post_cameras pc ON pc.post_id = p.id
         JOIN cameras c ON c.id = pc.camera_id AND c.fortify_id = $2
         WHERE g.fortify_poi_id = $1 AND g.is_active = TRUE
-      `, [evt.poiId, evt.cameraId])
+          AND (
+            (st.start_time < st.end_time AND $4::time BETWEEN st.start_time AND st.end_time)
+            OR
+            (st.start_time > st.end_time AND ($4::time >= st.start_time OR $4::time <= st.end_time))
+          )
+      `, [evt.poiId, evt.cameraId, today, hm])
 
       if (rows.length === 0) return
 
@@ -114,6 +123,16 @@ class AbsenceEngine {
 
         console.log(`[AbsenceEngine] ✓ Presença: ${row.guard_name} → ${row.post_name}`)
 
+        // 3. Atualiza absence_state INDIVIDUAL do vigilante
+        await query(`
+          INSERT INTO absence_state (guard_id, post_id, status, absence_minutes, last_detected_at)
+          VALUES ($1, $2, 'present', 0, $3)
+          ON CONFLICT (guard_id, post_id) DO UPDATE SET
+            status = 'present', absence_minutes = 0,
+            last_detected_at = $3, updated_at = NOW()
+        `, [row.guard_id, row.post_id, evt.detectedAt])
+
+        // 4. Atualiza post_coverage_state do posto
         await query(`
           INSERT INTO post_coverage_state
             (post_id, status, last_detected_at, last_guard_id, last_guard_name, last_camera_id, absence_seconds)
@@ -124,21 +143,18 @@ class AbsenceEngine {
             last_camera_id = EXCLUDED.last_camera_id, absence_seconds = 0, updated_at = NOW()
         `, [row.post_id, evt.detectedAt, row.guard_id, row.guard_name, row.camera_id])
 
+        // 5. Resolve alarmes ativos do posto
         await query(`
           UPDATE alarms SET status = 'auto_resolved', acknowledged_at = NOW()
           WHERE post_id = $1 AND status IN ('active', 'snoozed')
         `, [row.post_id])
       }
 
-      await query(`
-        INSERT INTO absence_state (guard_id, post_id, status, absence_minutes, last_detected_at)
-        SELECT $1, gpa.post_id, 'present', 0, $2
-        FROM guard_post_assignments gpa
-        WHERE gpa.guard_id = $1 AND gpa.removed_at IS NULL LIMIT 1
-        ON CONFLICT (guard_id) DO UPDATE SET
-          last_detected_at = EXCLUDED.last_detected_at, absence_minutes = 0,
-          status = 'present', updated_at = NOW()
-      `, [rows[0].guard_id, evt.detectedAt])
+      // 6. Broadcast imediato
+      try {
+        const snapshot = await this.getSnapshot()
+        alarmService._broadcast({ type: 'SNAPSHOT_UPDATE', payload: snapshot })
+      } catch(e) {}
 
     } catch (err) {
       console.error('[AbsenceEngine] Erro ao processar evento:', err.message)
@@ -156,51 +172,39 @@ class AbsenceEngine {
         WHERE p.is_active = TRUE
       `)
 
-      // Lê modo de alocação uma vez fora do loop
       const { rows: modeCfg } = await query(
         "SELECT value FROM system_config WHERE key = 'allocation_mode'"
       )
       const allocationMode = modeCfg[0]?.value || 'specific'
 
       for (const post of posts) {
-        // 0. Verifica modo de alocação
-
         if (allocationMode === 'all_to_all') {
-          // No modo all_to_all, qualquer vigilante da watchlist cobre qualquer posto
-          // Alarme só dispara se NENHUM vigilante for detectado no prazo
-          // Usa o last_detected_at do post_coverage_state diretamente
           const now        = new Date()
           const lastSeen   = post.last_detected_at ? new Date(post.last_detected_at) : null
           const absenceSec = lastSeen ? Math.floor((now - lastSeen) / 1000) : 99999
           const threshold  = post.absence_threshold_seconds || 60
           const warning    = post.warning_threshold_seconds || 30
-
           let newStatus = 'covered'
           if (absenceSec >= threshold) newStatus = 'alarm'
           else if (absenceSec >= warning) newStatus = 'warning'
-
           await query(`
             INSERT INTO post_coverage_state (post_id, status, absence_seconds, updated_at)
             VALUES ($1, $2, $3, NOW())
             ON CONFLICT (post_id) DO UPDATE SET
               status = EXCLUDED.status, absence_seconds = EXCLUDED.absence_seconds, updated_at = NOW()
           `, [post.id, newStatus, absenceSec === 99999 ? null : absenceSec])
-
           if (newStatus === 'alarm' && post.current_status !== 'alarm') {
             await alarmService.triggerPostAlarm({
-              postId:           post.id,
-              postName:         post.name,
-              absenceSeconds:   absenceSec,
-              thresholdSeconds: threshold,
-              lastGuardId:      post.last_guard_id,
-              lastGuardName:    post.last_guard_name,
-              lastCameraId:     post.last_camera_id,
+              postId: post.id, postName: post.name,
+              absenceSeconds: absenceSec, thresholdSeconds: threshold,
+              lastGuardId: post.last_guard_id, lastGuardName: post.last_guard_name,
+              lastCameraId: post.last_camera_id,
             })
           }
           continue
         }
 
-        // 1. Verifica ausência justificada ativa PRIMEIRO (prioridade máxima)
+        // Verifica justificativa ativa
         const { rows: justifications } = await query(`
           SELECT id, duration_minutes, expires_at,
             GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW()))::INTEGER) AS seconds_remaining
@@ -220,7 +224,7 @@ class AbsenceEngine {
           continue
         }
 
-        // 3. Verifica escala (só após confirmar que não há justificativa)
+        // Verifica escala
         const { guards: activeGuards, mode } = await this._getActiveGuardsForPost(post.id)
         if (mode === 'schedule' && activeGuards.length === 0) {
           await query(`
@@ -230,13 +234,13 @@ class AbsenceEngine {
           continue
         }
 
-        // 4. Expira justificativas vencidas
+        // Expira justificativas vencidas
         await query(`
           UPDATE absence_justifications SET status = 'expired'
           WHERE post_id = $1 AND status = 'active' AND expires_at <= NOW()
         `, [post.id])
 
-        // 5. Calcula ausência e status
+        // Calcula ausência e status
         const now        = new Date()
         const lastSeen   = post.last_detected_at ? new Date(post.last_detected_at) : null
         const absenceSec = lastSeen ? Math.floor((now - lastSeen) / 1000) : 99999
@@ -254,16 +258,12 @@ class AbsenceEngine {
             status = EXCLUDED.status, absence_seconds = EXCLUDED.absence_seconds, updated_at = NOW()
         `, [post.id, newStatus, absenceSec === 99999 ? null : absenceSec])
 
-        // 6. Dispara alarme se necessário
         if (newStatus === 'alarm' && post.current_status !== 'alarm') {
           await alarmService.triggerPostAlarm({
-            postId:           post.id,
-            postName:         post.name,
-            absenceSeconds:   absenceSec,
-            thresholdSeconds: threshold,
-            lastGuardId:      post.last_guard_id,
-            lastGuardName:    post.last_guard_name,
-            lastCameraId:     post.last_camera_id,
+            postId: post.id, postName: post.name,
+            absenceSeconds: absenceSec, thresholdSeconds: threshold,
+            lastGuardId: post.last_guard_id, lastGuardName: post.last_guard_name,
+            lastCameraId: post.last_camera_id,
           })
         }
       }
@@ -303,7 +303,8 @@ class AbsenceEngine {
               'guard_id', g.id, 'guard_name', g.name,
               'badge_number', g.badge_number, 'photo_url', g.photo_url,
               'last_detected_at', ab.last_detected_at,
-              'status', ab.status, 'absence_minutes', ab.absence_minutes
+              'status', ab.status, 'absence_minutes', ab.absence_minutes,
+              'absence_seconds', EXTRACT(EPOCH FROM (NOW() - ab.last_detected_at))::INTEGER
             )
           ) FILTER (WHERE g.id IS NOT NULL),
           '[]'
@@ -324,14 +325,12 @@ class AbsenceEngine {
           )
       ) sa ON sa.post_id = p.id
       LEFT JOIN guards g ON g.id = sa.guard_id AND g.is_active = TRUE
-      LEFT JOIN absence_state ab ON ab.guard_id = g.id
+      LEFT JOIN absence_state ab ON ab.guard_id = g.id AND ab.post_id = p.id
       WHERE p.is_active = TRUE
       GROUP BY p.id, p.name, p.floor, p.absence_threshold_seconds, p.warning_threshold_seconds,
                pcs.status, pcs.absence_seconds, pcs.last_detected_at, pcs.last_guard_name,
                pcs.updated_at, al.id, al.triggered_at
-      ORDER BY
-        CASE pcs.status WHEN 'alarm' THEN 0 WHEN 'warning' THEN 1 WHEN 'justified' THEN 2 ELSE 3 END,
-        pcs.absence_seconds DESC NULLS LAST
+      ORDER BY p.name ASC
     `, [today, hm])
     return rows
   }

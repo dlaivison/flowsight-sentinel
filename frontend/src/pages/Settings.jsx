@@ -258,7 +258,7 @@ export default function Settings() {
               <TextField configKey="fortify_username" label="Usuário Fortify" hint="Nome de usuário para autenticação"  placeholder="apifortytest"/>
               <TextField configKey="fortify_password" label="Senha Fortify"   hint="Senha do usuário Fortify"          placeholder="••••••••" secret/>
               <SliderField configKey="polling_interval_seconds" label="Intervalo de recálculo" hint="Com que frequência recalcular ausências" min={10} max={120} step={5} unit="s"/>
-              <SliderField configKey="watchlist_sync_interval" label="Sincronização da watchlist" hint="Com que frequência sincronizar vigilantes do Fortify" min={1} max={60} step={1} unit="min"/>
+              <SliderField configKey="watchlist_sync_interval" label="Sincronização da watchlist" hint="Com que frequência sincronizar vigilantes do Fortify (em segundos)" min={10} max={300} step={10} unit="s"/>
               <Field label="Modo de alocação" hint="Specific: vigilante por posto | All to All: qualquer vigilante cobre qualquer posto">
                 <select
                   defaultValue={config.allocation_mode || 'specific'}
